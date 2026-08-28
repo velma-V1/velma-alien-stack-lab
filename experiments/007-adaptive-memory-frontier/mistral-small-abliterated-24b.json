@@ -1,0 +1,17 @@
+{
+  "experiment_id": "007-adaptive-memory-frontier-mistral-small-abliterated-24b",
+  "model": "huihui_ai/mistral-small-abliterated:24b",
+  "quantization": "as-installed",
+  "context_limit": 25600,
+  "temperature": 0.0,
+  "seed": 20260828,
+  "target_minutes": 55.0,
+  "ceiling_minutes": 60.0,
+  "safety_margin_seconds": 90.0,
+  "discovery_budget": 64,
+  "transfer_budget": 64,
+  "small_budget": 64,
+  "medium_budget": 64,
+  "large_budget": 64,
+  "ollama_url": "http://localhost:11434"
+}
