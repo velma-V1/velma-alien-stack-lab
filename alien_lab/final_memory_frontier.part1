@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import random
+import re
+import statistics
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+MODULUS = 997
+BOOTSTRAP_RULES = 24
+TASKS_PER_VARIANT = 6
+VARIANTS_PER_LEVEL = 2
+MAX_LEVEL = 48
+PASS_THRESHOLD = 5 / 6
+SUSTAINED_WINDOW = 5
+SUSTAINED_MAX_ACCURACY = 0.50
+CONSERVATIVE_BYTES_PER_TOKEN = 3
+MAX_CALL_RETRIES = 3
+
+ARM_NONE = "NONE"
+ARM_FULL = "FULL"
+ARM_RETRIEVED = "RETRIEVED"
+ARMS = (ARM_NONE, ARM_FULL, ARM_RETRIEVED)
+TITAN_NONE = "TITAN_NONE"
+TITAN_LIMITED = "TITAN_LIMITED"
+TITAN_MAX = "TITAN_MAX"
+TITAN_ARMS = (TITAN_NONE, TITAN_LIMITED, TITAN_MAX)
+
+
+def stable_hash(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class Rule:
+    rule_id: str
+    a: int
+    b: int
+    learned_level: int
+    evidence_id: str
+    fingerprint: str
+
+    def apply(self, x: int) -> int:
+        return (self.a * x + self.b) % MODULUS
+
+
+@dataclass(frozen=True)
+class Macro:
+    macro_id: str
+    rule_ids: tuple[str, ...]
+    learned_level: int
+    evidence_id: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class Task:
+    task_id: str
+    start: int
+    rule_ids: tuple[str, ...]
+    choices: dict[str, int]
+
+
+@dataclass
+class MemoryStore:
+    rules: dict[str, Rule] = field(default_factory=dict)
+    macros: dict[str, Macro] = field(default_factory=dict)
+
+    def fingerprint(self) -> str:
+        return stable_hash({
+            "rules": [asdict(self.rules[k]) for k in sorted(self.rules)],
+            "macros": [asdict(self.macros[k]) for k in sorted(self.macros)],
+        })
+
+    def learned_macros(self) -> tuple[Macro, ...]:
+        return tuple(self.macros[k] for k in sorted(self.macros))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"rules": [asdict(self.rules[k]) for k in sorted(self.rules)], "macros": [asdict(self.macros[k]) for k in sorted(self.macros)]}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "MemoryStore":
+        store = cls()
+        for r in raw.get("rules", []):
+            rule = Rule(**r); store.rules[rule.rule_id] = rule
+        for m in raw.get("macros", []):
+            m = dict(m); m["rule_ids"] = tuple(m["rule_ids"]); macro = Macro(**m); store.macros[macro.macro_id] = macro
+        return store
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    model: str
+    label: str
+    quantization: str = "as-installed"
+    context_limit: int = 25600
+    output_budget: int = 96
+    temperature: float = 0.0
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class SuiteConfig:
+    experiment_id: str
+    models: tuple[ModelSpec, ...]
+    seed: int = 20260828
+    ollama_url: str = "http://localhost:11434"
+    max_level: int = MAX_LEVEL
+    call_timeout_seconds: float = 600.0
+    retry_count: int = MAX_CALL_RETRIES
+
+    @classmethod
+    def from_json(cls, path: Path) -> "SuiteConfig":
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return cls(
+            experiment_id=raw["experiment_id"],
+            seed=int(raw.get("seed", 20260828)),
+            ollama_url=raw.get("ollama_url", "http://localhost:11434"),
+            max_level=int(raw.get("max_level", MAX_LEVEL)),
+            call_timeout_seconds=float(raw.get("call_timeout_seconds", 600)),
+            retry_count=int(raw.get("retry_count", MAX_CALL_RETRIES)),
+            models=tuple(ModelSpec(**m) for m in raw["models"]),
+        )
+
+
+def generate_bootstrap(seed: int) -> MemoryStore:
+    rng = random.Random(seed ^ 0xA11E007)
+    store = MemoryStore()
+    for i in range(1, BOOTSTRAP_RULES + 1):
+        rid = f"R{i:04d}"
+        a = rng.randrange(2, MODULUS)
+        b = rng.randrange(1, MODULUS)
+        evidence = f"bootstrap:{i}"
+        fp = stable_hash([rid, a, b, evidence])
+        store.rules[rid] = Rule(rid, a, b, 0, evidence, fp)
+    return store
+
+
+def apply_rules(store: MemoryStore, start: int, rule_ids: Iterable[str]) -> int:
+    x = start
+    for rid in rule_ids:
+        x = store.rules[rid].apply(x)
+    return x
+
+
+def level_depth(level: int) -> int:
+    if level < 1:
+        raise ValueError("level must be >= 1")
+    # Deliberately superlinear after L16; enough to push 24-27B models rather than
+    # merely grow prompt noise.
+    return level + 4 + max(0, (level - 16) // 2)
+
+
+def _choices(correct: int, wrongs: list[int], rng: random.Random) -> dict[str, int]:
+    vals = [correct]
+    for w in wrongs:
+        if w != correct and w not in vals:
+            vals.append(w)
+        if len(vals) == 4:
+            break
+    probe = 1
+    while len(vals) < 4:
+        w = (correct + probe * 37) % MODULUS
+        if w not in vals:
+            vals.append(w)
+        probe += 1
+    rng.shuffle(vals)
+    return dict(zip("ABCD", vals))
+
+
+def build_level(seed: int, level: int, variant: int, store: MemoryStore) -> tuple[tuple[Task, ...], dict[str, str]]:
+    if variant < 0:
+        raise ValueError("variant must be non-negative")
+    rng = random.Random(seed + level * 100003 + variant * 10000019)
+    rule_ids = sorted(store.rules)
+    depth = level_depth(level)
+    if depth > len(rule_ids):
+        # Repetition is intentional at high depth; the information set stays fixed
+        # while sequential state-tracking difficulty rises.
+        population = [rng.choice(rule_ids) for _ in range(depth)]
+    else:
+        population = rng.sample(rule_ids, depth)
+    tasks: list[Task] = []
+    sealed: dict[str, str] = {}
+    for i in range(TASKS_PER_VARIANT):
+        seq = list(population)
+        rng.shuffle(seq)
+        # rotate so packet tasks are not identical permutations
+        shift = i % len(seq)
+        seq = seq[shift:] + seq[:shift]
+        start = rng.randrange(MODULUS)
+        correct = apply_rules(store, start, seq)
+        wrong_drop = apply_rules(store, start, seq[:-1]) if len(seq) > 1 else (correct + 1) % MODULUS
+        wrong_reverse = apply_rules(store, start, reversed(seq))
+        wrong_stale = apply_rules(store, (start + 1) % MODULUS, seq)
+        choices = _choices(correct, [wrong_drop, wrong_reverse, wrong_stale], rng)
+        task_id = f"L{level:02d}-V{variant}-T{i+1}"
+        answer = next(k for k, v in choices.items() if v == correct)
+        tasks.append(Task(task_id, start, tuple(seq), choices))
+        sealed[task_id] = answer
+    return tuple(tasks), sealed
+
+
+def _best_macro_cover(task: Task, store: MemoryStore) -> tuple[list[tuple[str, str]], set[str]]:
+    """Greedy exact contiguous cover. Returns operations and macro IDs used."""
+    macros = sorted(store.learned_macros(), key=lambda m: (-len(m.rule_ids), m.macro_id))
+    ops: list[tuple[str, str]] = []
+    used: set[str] = set()
+    i = 0
+    seq = task.rule_ids
+    while i < len(seq):
+        found: Macro | None = None
+        for m in macros:
+            n = len(m.rule_ids)
