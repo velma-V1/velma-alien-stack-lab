@@ -1,0 +1,17 @@
+{
+  "experiment_id": "002-adaptive-hour-extension",
+  "model": "qwen3.5:9b-q8_0",
+  "quantization": "Q8_0",
+  "context_limit": 25600,
+  "temperature": 0.0,
+  "seed": 20260828,
+  "target_minutes": 55.0,
+  "ceiling_minutes": 60.0,
+  "safety_margin_seconds": 15.0,
+  "discovery_budget": 128,
+  "transfer_budget": 192,
+  "small_budget": 96,
+  "medium_budget": 192,
+  "large_budget": 400,
+  "ollama_url": "http://localhost:11434"
+}
