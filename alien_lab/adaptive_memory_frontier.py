@@ -21,7 +21,6 @@ ARM_RETRIEVED = "RETRIEVED"
 MEMORY_ARMS = (ARM_NONE, ARM_FULL, ARM_RETRIEVED)
 MODULUS = 97
 BOOTSTRAP_RULES = 12
-RULES_PER_LEVEL = 12
 TASKS_PER_LEVEL = 8
 MAX_LEVEL = 30
 FRONTIER_PASS_THRESHOLD = 7 / 8
@@ -129,7 +128,7 @@ def generate_rules(
         rule_id = f"M{index:04d}"
         a = rng.randint(2, MODULUS - 1)
         b = rng.randint(1, MODULUS - 1)
-        evidence_id = f"lesson:{learned_level}:{index}"
+        evidence_id = f"bootstrap:{learned_level}:{index}"
         rules.append(
             MemoryRule(
                 rule_id=rule_id,
@@ -170,6 +169,59 @@ def _apply_sequence(store: MemoryStore, start: int, rule_ids: Iterable[str]) -> 
     return value
 
 
+def _compose_sequence(store: MemoryStore, rule_ids: Iterable[str]) -> tuple[int, int]:
+    a_total = 1
+    b_total = 0
+    modulus = MODULUS
+    for rule_id in rule_ids:
+        rule = store.get(rule_id)
+        if rule.modulus != modulus:
+            raise ValueError("all memory rules must use the experiment modulus")
+        a_total = (rule.a * a_total) % modulus
+        b_total = (rule.a * b_total + rule.b) % modulus
+    return a_total, b_total
+
+
+def promote_task_macros(
+    store: MemoryStore,
+    tasks: Iterable[MemoryTask],
+    success_by_task: dict[str, bool],
+    *,
+    learned_level: int,
+) -> tuple[MemoryRule, ...]:
+    if learned_level < 1:
+        raise ValueError("learned macro level must be >= 1")
+    promoted: list[MemoryRule] = []
+    next_index = len(store) + 1
+    for task in tasks:
+        if success_by_task.get(task.task_id) is not True:
+            continue
+        a, b = _compose_sequence(store, task.rule_ids)
+        rule_id = f"M{next_index + len(promoted):04d}"
+        evidence_id = task.task_id
+        promoted.append(
+            MemoryRule(
+                rule_id=rule_id,
+                a=a,
+                b=b,
+                modulus=MODULUS,
+                learned_level=learned_level,
+                evidence_id=evidence_id,
+                fingerprint=_rule_fingerprint(
+                    rule_id,
+                    a,
+                    b,
+                    MODULUS,
+                    learned_level,
+                    evidence_id,
+                ),
+            )
+        )
+    if promoted:
+        store.append(promoted)
+    return tuple(promoted)
+
+
 def _select_rule_ids(rng: random.Random, level: int, store: MemoryStore) -> tuple[str, ...]:
     rules = list(store.all_rules())
     depth = composition_depth(level)
@@ -185,7 +237,8 @@ def _select_rule_ids(rng: random.Random, level: int, store: MemoryStore) -> tupl
         newest = [rule for rule in rules if rule.learned_level == learned_levels[-1]]
         selected.extend([rng.choice(oldest), rng.choice(newest)])
 
-    remaining = [rule for rule in rules if rule.rule_id not in {item.rule_id for item in selected}]
+    selected_ids = {item.rule_id for item in selected}
+    remaining = [rule for rule in rules if rule.rule_id not in selected_ids]
     rng.shuffle(remaining)
     selected.extend(remaining[: depth - len(selected)])
     rng.shuffle(selected)
@@ -330,6 +383,12 @@ def _preflight_memory() -> tuple[MemoryStore, tuple[MemoryTask, ...], dict[str, 
     return store, tasks, sealed
 
 
+def confirmed_failure_values(primary_accuracy: float | None, confirmation_accuracy: float | None) -> bool:
+    if primary_accuracy is None or confirmation_accuracy is None:
+        return False
+    return primary_accuracy < FRONTIER_PASS_THRESHOLD and confirmation_accuracy < FRONTIER_PASS_THRESHOLD
+
+
 def deterministic_preflight(seed: int) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
@@ -371,19 +430,22 @@ def deterministic_preflight(seed: int) -> dict[str, Any]:
     store = bootstrap_store(seed)
     metrics: list[tuple[int, int]] = []
     prior_rule_ok = True
+    macro_evidence_ok = True
     for level in range(1, 7):
         tasks, _ = build_level_packet(seed, level, store)
         metrics.append((len(store), composition_depth(level)))
         prior_rule_ok = prior_rule_ok and all(
             store.get(rule_id).learned_level < level for task in tasks for rule_id in task.rule_ids
         )
-        store.append(
-            generate_rules(
-                seed,
-                start_index=len(store) + 1,
-                count=RULES_PER_LEVEL,
-                learned_level=level,
-            )
+        promoted = promote_task_macros(
+            store,
+            tasks,
+            {task.task_id: True for task in tasks},
+            learned_level=level,
+        )
+        macro_evidence_ok = macro_evidence_ok and all(
+            rule.evidence_id.startswith(f"memory-L{level}-") and rule.learned_level == level
+            for rule in promoted
         )
     checks.append(
         {
@@ -392,6 +454,22 @@ def deterministic_preflight(seed: int) -> dict[str, Any]:
         }
     )
     checks.append({"name": "only_prior_rules_used", "passed": prior_rule_ok})
+    checks.append({"name": "successful_work_becomes_evidenced_macro_memory", "passed": macro_evidence_ok})
+
+    failed_store = bootstrap_store(seed)
+    failed_tasks, _ = build_level_packet(seed, 1, failed_store, task_count=2)
+    failed_promoted = promote_task_macros(
+        failed_store,
+        failed_tasks,
+        {failed_tasks[0].task_id: True, failed_tasks[1].task_id: False},
+        learned_level=1,
+    )
+    checks.append(
+        {
+            "name": "failed_work_cannot_teach_memory",
+            "passed": len(failed_promoted) == 1 and failed_promoted[0].evidence_id == failed_tasks[0].task_id,
+        }
+    )
 
     parsed = parse_packet_response("1:A 2:B 3:C 4:D", ["a", "b", "c", "d"])
     checks.append({"name": "strict_packet_parser", "passed": parsed == {"a": "A", "b": "B", "c": "C", "d": "D"}})
@@ -403,12 +481,6 @@ def deterministic_preflight(seed: int) -> dict[str, Any]:
     )
 
     return {"seed": seed, "checks": checks, "passed": all(check["passed"] for check in checks)}
-
-
-def confirmed_failure_values(primary_accuracy: float | None, confirmation_accuracy: float | None) -> bool:
-    if primary_accuracy is None or confirmation_accuracy is None:
-        return False
-    return primary_accuracy < FRONTIER_PASS_THRESHOLD and confirmation_accuracy < FRONTIER_PASS_THRESHOLD
 
 
 class AdaptiveMemoryRunner:
@@ -465,11 +537,11 @@ class AdaptiveMemoryRunner:
             "controls": {
                 "thinking_enabled": False,
                 "bootstrap_rules": BOOTSTRAP_RULES,
-                "rules_per_level": RULES_PER_LEVEL,
                 "tasks_per_level": TASKS_PER_LEVEL,
                 "max_level": MAX_LEVEL,
                 "frontier_pass_threshold": FRONTIER_PASS_THRESHOLD,
                 "bytes_per_token_guard": CONSERVATIVE_BYTES_PER_TOKEN,
+                "learning_policy": "only verified successful tasks promote deterministic composite macros",
             },
         }
         (self.output_dir / "environment.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -541,6 +613,7 @@ class AdaptiveMemoryRunner:
             "supplied_memory_count": len(memory_ids),
             "memory_snapshot_fingerprint": store.snapshot_fingerprint(),
             "composition_depth": len(tasks[0].rule_ids) if tasks else 0,
+            "task_results": [],
         }
         append_jsonl(self.output_dir / "runs.jsonl", record)
         return record
@@ -636,35 +709,49 @@ class AdaptiveMemoryRunner:
             "memory_snapshot_fingerprint": store.snapshot_fingerprint(),
             "composition_depth": len(tasks[0].rule_ids) if tasks else 0,
             "response": result.response,
+            "task_results": per_task,
         }
         append_jsonl(self.output_dir / "runs.jsonl", record)
         return record
 
-    def _append_learned_rules(self, store: MemoryStore, learned_level: int) -> None:
-        new_rules = generate_rules(
-            self.config.seed,
-            start_index=len(store) + 1,
-            count=RULES_PER_LEVEL,
+    def _promote_from_run(
+        self,
+        store: MemoryStore,
+        tasks: tuple[MemoryTask, ...],
+        run_record: dict[str, Any],
+        *,
+        learned_level: int,
+    ) -> tuple[MemoryRule, ...]:
+        success_by_task = {
+            row["task_id"]: bool(row["verified_success"])
+            for row in run_record.get("task_results", [])
+            if row.get("verified_success") is not None
+        }
+        promoted = promote_task_macros(
+            store,
+            tasks,
+            success_by_task,
             learned_level=learned_level,
         )
-        store.append(new_rules)
-        for rule in new_rules:
+        for rule in promoted:
             append_jsonl(
                 self.output_dir / "memory.jsonl",
                 {
-                    "event": "memory_acquired",
+                    "event": "validated_macro_promoted",
                     "learned_level": learned_level,
+                    "evidence_task_id": rule.evidence_id,
                     "rule": rule.to_dict(),
                     "snapshot_fingerprint": store.snapshot_fingerprint(),
                 },
             )
+        return promoted
 
     def _write_bootstrap_memory(self, store: MemoryStore) -> None:
         for rule in store.all_rules():
             append_jsonl(
                 self.output_dir / "memory.jsonl",
                 {
-                    "event": "memory_acquired",
+                    "event": "bootstrap_memory",
                     "learned_level": 0,
                     "rule": rule.to_dict(),
                     "snapshot_fingerprint": store.snapshot_fingerprint(),
@@ -702,7 +789,8 @@ class AdaptiveMemoryRunner:
                 f"- L{row['level']} depth={row['composition_depth']} rules={row['memory_rule_count']}: "
                 f"none={arms.get(ARM_NONE, {}).get('accuracy')} "
                 f"full={arms.get(ARM_FULL, {}).get('accuracy')} "
-                f"retrieved={arms.get(ARM_RETRIEVED, {}).get('accuracy')}"
+                f"retrieved={arms.get(ARM_RETRIEVED, {}).get('accuracy')} "
+                f"promoted={row.get('promoted_macro_count', 0)}"
             )
         (self.output_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -783,6 +871,7 @@ class AdaptiveMemoryRunner:
                 "composition_depth": composition_depth(level),
                 "arms": arms,
                 "confirmation": None,
+                "promoted_macro_count": 0,
             }
             self.levels.append(level_row)
 
@@ -803,10 +892,14 @@ class AdaptiveMemoryRunner:
             primary_accuracy = primary["accuracy"]
             if primary_accuracy is not None and primary_accuracy >= FRONTIER_PASS_THRESHOLD:
                 last_passing = level
-                self._append_learned_rules(store, level)
+                promoted = self._promote_from_run(store, tasks, primary, learned_level=level)
+                level_row["promoted_macro_count"] = len(promoted)
+                if len(promoted) < 7:
+                    capability_valid = False
+                    interpretation = "INVALID_MEMORY_PROMOTION"
+                    break
                 continue
 
-            # One miss is not a frontier. Confirm at the same difficulty with fresh tasks and seed.
             confirmation_tasks, confirmation_sealed = build_level_packet(
                 self.config.seed,
                 level,
@@ -837,7 +930,17 @@ class AdaptiveMemoryRunner:
                 break
 
             unstable_levels.append(level)
-            self._append_learned_rules(store, level)
+            promoted = self._promote_from_run(
+                store,
+                confirmation_tasks,
+                confirmation,
+                learned_level=level,
+            )
+            level_row["promoted_macro_count"] = len(promoted)
+            if len(promoted) < 7:
+                capability_valid = False
+                interpretation = "INVALID_MEMORY_PROMOTION"
+                break
 
         self.summary = {
             "interpretation": interpretation,
