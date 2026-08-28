@@ -1,0 +1,17 @@
+{
+  "experiment_id": "003-scoring-repair-validation",
+  "model": "qwen3.5:9b-q8_0",
+  "quantization": "Q8_0",
+  "context_limit": 25600,
+  "temperature": 0.0,
+  "seed": 20260828,
+  "target_minutes": 10.0,
+  "ceiling_minutes": 15.0,
+  "safety_margin_seconds": 15.0,
+  "discovery_budget": 64,
+  "transfer_budget": 96,
+  "small_budget": 48,
+  "medium_budget": 96,
+  "large_budget": 256,
+  "ollama_url": "http://localhost:11434"
+}
