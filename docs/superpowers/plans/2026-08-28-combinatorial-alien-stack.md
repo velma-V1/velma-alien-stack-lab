@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a reproducible, time-budgeted experiment harness that exhaustively tests six external-cognition primitives alone and in compounds, then adaptively spends remaining runtime on transfer, order effects, and neural-compute substitution.
+**Goal:** Build a reproducible, time-budgeted experiment harness that exhaustively tests six external-cognition primitives alone and in compounds, then adaptively spends remaining runtime on transfer, order effects, neural-compute substitution, and additional replication up to a one-hour ceiling.
 
 **Architecture:** A standard-library Python package generates sealed synthetic software-maintenance tasks, compiles answer-free cognitive workspaces through composable deterministic passes, calls local Ollama, appends immutable JSONL run records, and analyzes the Boolean cube for main effects, interaction effects, Shapley contributions, Pareto-efficient stacks, transfer, and order effects. Expected answers remain isolated in a sealed evaluator file that compiler code never receives.
 
@@ -14,12 +14,14 @@
 
 - Fixed model subject: `qwen3.5:9b-q8_0`.
 - Default context: 25,600 tokens.
-- Default target runtime: 35 minutes; stop scheduling optional work at 40 minutes.
+- Default target runtime: 55 minutes; absolute experiment ceiling: 60 minutes.
 - Temperature 0 and deterministic run seeds.
 - Compiler code never receives expected answers.
 - RAW and STRUCTURED controls must remain distinguishable from derived cognition.
 - All six primitive subsets must be representable; Phase 1 enumerates the complete 64-arm Boolean cube.
 - Raw outputs and derivation provenance are append-only evidence.
+- Extra runtime is spent on broader causal coverage and replication before increasing neural reasoning budgets.
+- `TIME_BUDGET_ABORT` is recorded separately and never scored as an ordinary model failure.
 - No experiment result automatically changes V31M4.
 
 ---
@@ -84,7 +86,7 @@
 **Interfaces:**
 - Produces `OllamaClient.generate(...)`, `RunRecord`, `append_jsonl(path, record)`.
 
-- [ ] Write failing tests for API payload shape, metric extraction, ceiling detection, and append-only JSONL serialization using a local fake HTTP server.
+- [ ] Write failing tests for API payload shape, metric extraction, ceiling detection, wall-clock timeout classification, and append-only JSONL serialization using a local fake HTTP server.
 - [ ] Verify RED.
 - [ ] Implement with Python standard-library HTTP only.
 - [ ] Verify GREEN.
@@ -116,9 +118,10 @@
 **Interfaces:**
 - Produces `ExperimentConfig`, `ExperimentRunner.run()`, CLI `python -m alien_lab.experiment`.
 
-- [ ] Write tests with a fake model client proving required Boolean-cube work runs before optional phases, rolling timing determines optional scheduling, no new optional run begins after the hard stop, and an in-flight run is never discarded.
+- [ ] Write tests with a fake model client proving required Boolean-cube work runs before optional phases, rolling timing determines optional scheduling, and no optional run starts unless its rolling high-percentile duration plus safety margin fits within the 60-minute ceiling.
+- [ ] Write a failing test proving a request that reaches the absolute experiment deadline is classified as `TIME_BUDGET_ABORT` and excluded from normal failure-rate calculations.
 - [ ] Verify RED.
-- [ ] Implement phases: calibration, exhaustive discovery, transfer, order checks, compute substitution.
+- [ ] Implement phases: calibration, exhaustive discovery, additional discovery replication, transfer, order checks, compute substitution, adversarial controls.
 - [ ] Verify GREEN.
 - [ ] Commit.
 
@@ -148,7 +151,7 @@
 **Interfaces:**
 - Produces one-command local execution instructions and frozen defaults.
 
-- [ ] Add configuration with model `qwen3.5:9b-q8_0`, context `25600`, target `35`, hard stop `40`, and the three reasoning budgets.
+- [ ] Add configuration with model `qwen3.5:9b-q8_0`, context `25600`, target `55`, absolute ceiling `60`, safety-margin scheduling, and the three reasoning budgets.
 - [ ] Document exact WSL execution and result files.
 - [ ] Run the full unit-test suite.
 - [ ] Run `python -m alien_lab.experiment --dry-run` to verify the complete arm/phase plan without invoking Ollama.
@@ -160,6 +163,6 @@
 - No new files unless verification reveals defects.
 
 - [ ] Run `python -m unittest discover -s tests -v` and require zero failures.
-- [ ] Run `python -m alien_lab.experiment --dry-run --config experiments/001-combinatorial-alien-stack/config.json` and inspect counts, phase ordering, and answer isolation.
+- [ ] Run `python -m alien_lab.experiment --dry-run --config experiments/001-combinatorial-alien-stack/config.json` and inspect counts, phase ordering, answer isolation, and 60-minute scheduling behavior.
 - [ ] Inspect `git diff main...HEAD` for accidental evaluator leakage or hard-coded answer-derived logic.
 - [ ] Only after fresh verification, open the branch for user execution/review.
