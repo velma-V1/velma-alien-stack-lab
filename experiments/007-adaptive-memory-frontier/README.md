@@ -1,52 +1,63 @@
 # Experiment 007 — Adaptive External Memory Frontier
 
-Experiment 007 measures how far a fixed stateless model can extend its usable capability when only validated information from prior successful work is retained externally.
+Experiment 007 measures how far a fixed stateless model can extend usable capability when only validated information from prior successful work is retained externally.
 
-Every level uses fresh challenge instances and three matched arms:
+Every stage uses fresh challenge instances and three matched arms:
 
 - `NONE` — no retained rule definitions.
 - `FULL` — every validated learned rule is placed in the prompt.
-- `RETRIEVED` — only the rules referenced by the current packet are retrieved from the growing store.
+- `RETRIEVED` — only rules referenced by the current packet are retrieved from the growing store.
 
-The model receives no conversation history. Cross-level learning exists only in the append-only memory store.
+The model receives no conversation history. Cross-stage learning exists only in the append-only memory store.
 
 ## Verified learning
 
-The store starts with 12 sealed bootstrap rules. A correctly solved retrieved-memory task is deterministically compressed into a reusable affine macro rule representing the exact composition it solved. That macro is promoted only when the task was scored correct. Failed tasks cannot create memory.
+The store starts with 12 sealed bootstrap rules. A correctly solved retrieved-memory task is deterministically compressed into a reusable affine macro representing the exact composition it solved. That macro is promoted only when the task was scored correct. Failed tasks cannot create memory.
 
-Later levels deliberately mix old bootstrap memories with the newest learned macro memories. The model therefore has to reuse validated information learned from earlier successful levels.
+Later stages deliberately mix old bootstrap memories with newly learned macro memories. The model therefore has to reuse validated information learned from earlier successful stages.
 
-## Difficulty and frontier
+## One-hour accelerated frontier
 
-- 8 tasks per packet.
-- Level 1 requires 3 memory-rule applications per task.
-- Every next level adds one required composition step.
-- The store grows only through successful work.
-- Full-memory prompt clutter grows with the store; retrieved-memory prompt size tracks currently needed memories.
-- Retrieved-memory passes at 7/8 or better.
-- One miss does not define the frontier. The same difficulty is regenerated with a fresh seed and must fail again.
+The unattended launcher uses this preregistered composition-depth ladder:
+
+```text
+3, 5, 8, 12, 17, 23, 30, 38, 47, 57, 68, 80
+```
+
+Each number is the count of dependent external-memory rule applications required per task. There are 8 tasks per packet. The schedule is fixed before inference and never changes in response to model results.
+
+This is deliberately more aggressive than the linear development runner so an approximately one-hour run has a realistic chance of reaching failure instead of spending the whole window below the model's frontier.
+
+## Frontier and safety rules
+
+- `RETRIEVED` always runs first; it is the primary measurement.
+- `NONE` and `FULL` are controls and cannot turn a completed retrieved result into a failure.
+- Retrieved memory passes at 7/8 or better.
+- One retrieved miss does not define the frontier. A fresh same-difficulty packet must also fail.
+- Confirmation runs before controls after a primary miss so controls cannot consume the frontier-confirmation reserve.
 - `UNSCORABLE` is never counted as wrong.
+- Failed tasks never teach memory.
 - Prompt size is guarded before invocation to prevent silent context truncation.
-- The runner stops cleanly between levels if its wall-clock reserve is insufficient for a complete matched level.
+- A legitimate `FULL` context/attention boundary does not stop `RETRIEVED`.
+- The runner reserves measured P95 call time before starting work and stops cleanly when the remaining window is insufficient.
 
 ## Mandatory gate
 
-From the repository root:
+Use the clean Experiment 007 branch and do not start the long run unless every command below exits 0:
 
 ```bash
 python3 -m unittest tests.test_adaptive_memory_frontier -v
+python3 -m unittest tests.test_adaptive_memory_frontier_accelerated -v
 python3 -m unittest discover -s tests -v
-python3 -m alien_lab.adaptive_memory_frontier \
+python3 -m alien_lab.adaptive_memory_frontier_accelerated \
   --config experiments/007-adaptive-memory-frontier/mistral-small-abliterated-24b.json \
   --preflight-only
 ```
 
-Do not start the long run unless all three commands exit 0.
-
 ## Abliterated Mistral run
 
 ```bash
-python3 -m alien_lab.adaptive_memory_frontier \
+python3 -m alien_lab.adaptive_memory_frontier_accelerated \
   --config experiments/007-adaptive-memory-frontier/mistral-small-abliterated-24b.json \
   2>&1 | tee experiment-007-abliterated.log
 ```
@@ -54,7 +65,7 @@ python3 -m alien_lab.adaptive_memory_frontier \
 ## Clean Mistral comparator
 
 ```bash
-python3 -m alien_lab.adaptive_memory_frontier \
+python3 -m alien_lab.adaptive_memory_frontier_accelerated \
   --config experiments/007-adaptive-memory-frontier/mistral-small-clean-24b.json \
   2>&1 | tee experiment-007-clean.log
 ```
