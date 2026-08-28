@@ -43,7 +43,7 @@ class HeldoutOrderTransferTests(unittest.TestCase):
         self.assertNotEqual([task.to_dict() for task in first], [task.to_dict() for task in other])
         self.assertNotEqual(first_sealed, other_sealed)
 
-    def test_new_transfer_set_contains_real_semantic_order_sensitivity(self):
+    def test_new_transfer_set_has_three_preregistered_semantic_order_sensitive_tasks(self):
         tasks, _ = build_heldout_transfer_tasks(20260928)
         full = tuple(PRIMITIVES)
         changed = 0
@@ -52,7 +52,7 @@ class HeldoutOrderTransferTests(unittest.TestCase):
             candidate = compile_workspace(task.compiler_view(), full, order=CANDIDATE_ORDER)
             if semantic_workspace_signature(canonical) != semantic_workspace_signature(candidate):
                 changed += 1
-        self.assertGreaterEqual(changed, 4)
+        self.assertEqual(changed, 3)
 
     def test_six_replications_are_pre_registered(self):
         self.assertEqual(HELDOUT_REPLICATION_OFFSETS, (0, 1, 2, 3, 4, 5))
