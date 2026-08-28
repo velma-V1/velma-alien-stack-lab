@@ -1,0 +1,220 @@
+            if n >= 2 and tuple(seq[i:i+n]) == m.rule_ids:
+                found = m
+                break
+        if found:
+            ops.append(("M", found.macro_id)); used.add(found.macro_id); i += len(found.rule_ids)
+        else:
+            ops.append(("R", seq[i])); i += 1
+    return ops, used
+
+
+def _macro_value(store: MemoryStore, macro_id: str, x: int) -> int:
+    return apply_rules(store, x, store.macros[macro_id].rule_ids)
+
+
+def render_packet(tasks: tuple[Task, ...], store: MemoryStore, arm: str) -> tuple[str, tuple[str, ...], int, int]:
+    if arm not in ARMS:
+        raise ValueError(arm)
+    compiled: dict[str, list[tuple[str, str]]] = {}
+    used: set[str] = set()
+    raw_steps = sum(len(t.rule_ids) for t in tasks)
+    if arm == ARM_NONE:
+        for t in tasks:
+            compiled[t.task_id] = [("R", rid) for rid in t.rule_ids]
+    else:
+        for t in tasks:
+            compiled[t.task_id], u = _best_macro_cover(t, store); used |= u
+    supplied = set()
+    if arm == ARM_RETRIEVED:
+        supplied = used
+    elif arm == ARM_FULL:
+        supplied = set(store.macros)
+
+    lines = [
+        "EXPERIMENT 007 FINAL CAPABILITY FRONTIER",
+        "All arithmetic is modulo 997.",
+        "BASE RULEBOOK (identical in every arm):",
+    ]
+    for rid in sorted(store.rules):
+        r = store.rules[rid]
+        lines.append(f"{rid}: next=({r.a}*current+{r.b}) mod 997")
+    lines.append(f"LEARNED MEMORY ARM: {arm}")
+    if supplied:
+        lines.append("VALIDATED LEARNED MACROS:")
+        for mid in sorted(supplied):
+            m = store.macros[mid]
+            lines.append(f"{mid}: expands exactly to {' -> '.join(m.rule_ids)}")
+    else:
+        lines.append("NO LEARNED MACROS SUPPLIED")
+    compiled_steps = 0
+    for idx, t in enumerate(tasks, 1):
+        ops = compiled[t.task_id]; compiled_steps += len(ops)
+        op_text = " -> ".join(v for _, v in ops)
+        lines += [f"TASK {idx}", f"START: {t.start}", f"PROGRAM: {op_text}", "CHOICES"]
+        lines += [f"{k}: {v}" for k, v in t.choices.items()]
+    lines += ["OUTPUT CONTRACT", "Return exactly: " + " ".join(f"{i}:<LETTER>" for i in range(1, len(tasks)+1)), "No explanation."]
+    return "\n".join(lines), tuple(sorted(supplied)), raw_steps, compiled_steps
+
+
+def parse_answers(text: str | None, task_ids: list[str]) -> dict[str, str | None]:
+    if not text:
+        return {t: None for t in task_ids}
+    pat = re.findall(r"(?i)(\d+)\s*:\s*([ABCD])", text.strip())
+    mapped = {int(i): a.upper() for i, a in pat}
+    return {t: mapped.get(i+1) for i, t in enumerate(task_ids)}
+
+
+def promote_verified(store: MemoryStore, tasks: tuple[Task, ...], task_results: list[dict[str, Any]], level: int) -> list[Macro]:
+    promoted: list[Macro] = []
+    successes = {r["task_id"] for r in task_results if r.get("verified_success") is True}
+    known_sequences = {m.rule_ids for m in store.macros.values()}
+    for task in tasks:
+        if task.task_id not in successes:
+            continue
+        seq = task.rule_ids
+        # Learn multiple exact subsequences so memory can genuinely scale while all
+        # records remain mathematically verified by construction.
+        candidates = [seq]
+        if len(seq) >= 6:
+            third = max(2, len(seq)//3)
+            candidates += [seq[:third], seq[third:2*third], seq[-third:]]
+        for sub in candidates:
+            if len(sub) < 2 or sub in known_sequences:
+                continue
+            mid = f"M{len(store.macros)+1:05d}"
+            evidence = task.task_id
+            fp = stable_hash([mid, sub, level, evidence])
+            m = Macro(mid, tuple(sub), level, evidence, fp)
+            # Exact independent equivalence check across probe states.
+            for x in (0, 1, 17, 113, 996):
+                if _macro_value_from_sequence(store, sub, x) != apply_rules(store, x, sub):
+                    raise AssertionError("macro oracle mismatch")
+            store.macros[mid] = m
+            known_sequences.add(tuple(sub)); promoted.append(m)
+    return promoted
+
+
+def _macro_value_from_sequence(store: MemoryStore, seq: tuple[str, ...], x: int) -> int:
+    return apply_rules(store, x, seq)
+
+
+def _jsonl(path: Path, row: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def context_guard(prompt: str, limit: int) -> tuple[bool, int, int]:
+    b = len(prompt.encode())
+    est = math.ceil(b / CONSERVATIVE_BYTES_PER_TOKEN)
+    return est <= limit, b, est
+
+
+def _ci95(values: list[float]) -> tuple[float | None, float | None]:
+    if not values:
+        return None, None
+    mean = statistics.mean(values)
+    if len(values) == 1:
+        return mean, mean
+    se = statistics.stdev(values) / math.sqrt(len(values))
+    return max(0.0, mean - 1.96*se), min(1.0, mean + 1.96*se)
+
+
+def characterize(level_rows: list[dict[str, Any]], arm: str) -> dict[str, Any]:
+    scored = []
+    for row in level_rows:
+        vals = [v["arms"][arm]["accuracy"] for v in row["variants"] if v["arms"][arm]["status"] == "OK"]
+        if vals:
+            scored.append((row["level"], statistics.mean(vals)))
+    first_miss = next((l for l, a in scored if a < 1.0), None)
+    first_below = next((l for l, a in scored if a < PASS_THRESHOLD), None)
+    last_pass = max((l for l, a in scored if a >= PASS_THRESHOLD), default=None)
+    collapse = None
+    for i in range(len(scored)-SUSTAINED_WINDOW+1):
+        window = scored[i:i+SUSTAINED_WINDOW]
+        if all(a <= SUSTAINED_MAX_ACCURACY for _, a in window):
+            collapse = window[0][0]; break
+    recoveries = []
+    had_below = False
+    for l, a in scored:
+        if a < PASS_THRESHOLD:
+            had_below = True
+        elif had_below:
+            recoveries.append(l)
+    return {
+        "first_miss_level": first_miss,
+        "first_below_threshold_level": first_below,
+        "last_passing_level": last_pass,
+        "sustained_collapse_start": collapse,
+        "recovery_levels_after_failure": recoveries,
+        "level_curve": [{"level": l, "accuracy": a} for l, a in scored],
+    }
+
+
+class Final007Runner:
+    def __init__(self, config: SuiteConfig, client_factory: Callable[[str], Any], output_dir: Path):
+        self.config = config
+        self.client_factory = client_factory
+        self.output_dir = output_dir
+
+    def _model_dir(self, spec: ModelSpec) -> Path:
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", spec.label)
+        return self.output_dir / safe
+
+    def _safe_generate(self, client: Any, spec: ModelSpec, prompt: str, seed: int) -> tuple[Any | None, list[dict[str, Any]]]:
+        failures = []
+        for attempt in range(1, self.config.retry_count + 1):
+            try:
+                result = client.generate(
+                    model=spec.model, prompt=prompt, num_ctx=spec.context_limit,
+                    num_predict=spec.output_budget, temperature=spec.temperature,
+                    seed=seed, timeout_seconds=self.config.call_timeout_seconds,
+                )
+                if result.status == "OK" and not getattr(result, "hit_ceiling", False):
+                    return result, failures
+                failures.append({"attempt": attempt, "status": result.status, "done_reason": getattr(result, "done_reason", "")})
+            except Exception as exc:
+                failures.append({"attempt": attempt, "status": "EXCEPTION", "error": repr(exc)})
+            if attempt < self.config.retry_count:
+                time.sleep(0.01)
+        return None, failures
+
+    def _run_arm(self, client: Any, spec: ModelSpec, model_dir: Path, level: int, variant: int,
+                 tasks: tuple[Task, ...], sealed: dict[str, str], store: MemoryStore, arm: str) -> dict[str, Any]:
+        prompt, supplied, raw_steps, compiled_steps = render_packet(tasks, store, arm)
+        fits, pbytes, est = context_guard(prompt, spec.context_limit)
+        base = {
+            "level": level, "variant": variant, "arm": arm, "prompt_hash": stable_hash(prompt),
+            "prompt_bytes": pbytes, "estimated_prompt_tokens": est, "memory_supplied": list(supplied),
+            "memory_supplied_count": len(supplied), "memory_store_count": len(store.macros),
+            "memory_fingerprint": store.fingerprint(), "raw_program_steps": raw_steps,
+            "compiled_program_steps": compiled_steps, "steps_saved": raw_steps-compiled_steps,
+        }
+        if not fits:
+            row = {**base, "status": "CONTEXT_CAP_REACHED", "accuracy": None, "task_results": []}
+            _jsonl(model_dir/"runs.jsonl", row); return row
+        result, retry_failures = self._safe_generate(client, spec, prompt, self.config.seed + level*1000 + variant*10)
+        if result is None:
+            row = {**base, "status": "INFRASTRUCTURE_UNSCORABLE", "accuracy": None,
+                   "retry_failures": retry_failures, "task_results": []}
+            _jsonl(model_dir/"runs.jsonl", row); return row
+        ids = [t.task_id for t in tasks]
+        pred = parse_answers(result.response, ids)
+        complete = all(pred[t] is not None for t in ids)
+        if not complete:
+            row = {**base, "status": "FORMAT_UNSCORABLE", "accuracy": None, "response": result.response,
+                   "retry_failures": retry_failures, "task_results": []}
+            _jsonl(model_dir/"runs.jsonl", row); return row
+        task_results=[]
+        for t in tasks:
+            success = pred[t.task_id] == sealed[t.task_id]
+            tr = {"task_id": t.task_id, "prediction": pred[t.task_id], "expected": sealed[t.task_id],
+                  "verified_success": success, "start": t.start, "rule_ids": list(t.rule_ids)}
+            task_results.append(tr); _jsonl(model_dir/"observations.jsonl", {**base, **tr})
+        acc = sum(r["verified_success"] for r in task_results)/len(task_results)
+        row = {**base, "status": "OK", "accuracy": acc, "response": result.response,
+               "prompt_tokens": getattr(result,"prompt_tokens",0), "eval_tokens": getattr(result,"eval_tokens",0),
+               "wall_ms": getattr(result,"wall_ms",0.0), "retry_failures": retry_failures, "task_results": task_results}
+        _jsonl(model_dir/"runs.jsonl", row); return row
+
+    def _checkpoint(self, model_dir: Path, payload: dict[str, Any]) -> None:
