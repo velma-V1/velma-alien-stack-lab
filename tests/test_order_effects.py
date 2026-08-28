@@ -3,12 +3,26 @@ import unittest
 from alien_lab.order_effects import (
     CANDIDATE_ORDER,
     CANONICAL_ORDER,
+    ControlledSeedClient,
     build_order_stress_tasks,
     order_catalog,
     semantic_workspace_signature,
 )
 from alien_lab.compiler import compile_workspace
 from alien_lab.design import PRIMITIVES
+
+
+class SeedStub:
+    def __init__(self):
+        self.calls = []
+        self.base_url = "http://stub"
+
+    def model_metadata(self, model, timeout_seconds=5.0):
+        return {"name": model}
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        return kwargs
 
 
 class OrderEffectsTests(unittest.TestCase):
@@ -21,6 +35,14 @@ class OrderEffectsTests(unittest.TestCase):
             self.assertEqual(len(order), len(PRIMITIVES))
         self.assertIn(CANONICAL_ORDER, orders)
         self.assertIn(CANDIDATE_ORDER, orders)
+
+    def test_controlled_seed_client_overrides_runner_seed(self):
+        inner = SeedStub()
+        client = ControlledSeedClient(inner)
+        client.seed_override = 4242
+        result = client.generate(seed=999, prompt="x")
+        self.assertEqual(result["seed"], 4242)
+        self.assertEqual(inner.calls[-1]["seed"], 4242)
 
     def test_stress_set_targets_four_real_order_dependencies(self):
         tasks, sealed = build_order_stress_tasks(20260828)
