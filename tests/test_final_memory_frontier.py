@@ -10,7 +10,6 @@ class ScriptClient:
             x=self.script.pop(0)
             if isinstance(x,Exception): raise x
             return x
-        # Derive task count and answer A for generic continuation tests.
         n=len(re.findall(r"(?m)^TASK \d+$",kw['prompt']))
         response=" ".join(f"{i}:A" for i in range(1,n+1)) if n else "A"
         return SimpleNamespace(status="OK",response=response,hit_ceiling=False,prompt_tokens=10,eval_tokens=5,wall_ms=1,done_reason="stop")
@@ -22,7 +21,6 @@ class Tests(unittest.TestCase):
         r=deterministic_audit(); self.assertTrue(r['passed'],r); self.assertGreater(r['perfect_learning_macro_count'],250)
     def test_same_facts_all_arms_and_retrieved_subset(self):
         st=generate_bootstrap(1); tasks,sealed=build_level(1,1,0,st)
-        # learn from first level
         promote_verified(st,tasks,[{"task_id":t.task_id,"verified_success":True} for t in tasks],1)
         texts={a:render_packet(tasks,st,a) for a in ARMS}
         for rid in st.rules:
@@ -74,16 +72,15 @@ class Tests(unittest.TestCase):
             none=res['attempts'][TITAN_NONE]; limited=res['attempts'][TITAN_LIMITED]; maximum=res['attempts'][TITAN_MAX]
             self.assertEqual(none['memory_count'],0)
             self.assertGreater(limited['memory_count'],0)
+            self.assertGreater(maximum['memory_count'],limited['memory_count'])
             self.assertLessEqual(limited['rendered_program_steps'], none['rendered_program_steps'])
             self.assertLessEqual(maximum['rendered_program_steps'], limited['rendered_program_steps'])
     def test_checkpoint_atomic_and_written_each_variant(self):
         cfg=SuiteConfig('x',(ModelSpec('m','m'),),max_level=1)
-        # model answers may be wrong; run must still complete
         with tempfile.TemporaryDirectory() as td:
             out=Path(td); s=Final007Runner(cfg,ScriptClient,out).run_suite(); md=out/'m'
             self.assertTrue((md/'checkpoint.json').exists()); cp=json.loads((md/'checkpoint.json').read_text()); self.assertTrue(cp['completed'])
             self.assertTrue(s['models'][0]['completed'])
-
     def test_resume_skips_completed_variant_and_finishes(self):
         cfg=SuiteConfig('x',(ModelSpec('m','m'),),max_level=2)
         with tempfile.TemporaryDirectory() as td:
