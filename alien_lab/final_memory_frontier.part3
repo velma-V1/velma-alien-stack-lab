@@ -1,0 +1,188 @@
+        tmp = model_dir/"checkpoint.json.tmp"; final=model_dir/"checkpoint.json"
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True)+"\n", encoding="utf-8"); tmp.replace(final)
+
+    def _load_checkpoint(self, model_dir: Path) -> dict[str, Any] | None:
+        path = model_dir/"checkpoint.json"
+        if not path.exists(): return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def run_model(self, spec: ModelSpec) -> dict[str, Any]:
+        model_dir=self._model_dir(spec); model_dir.mkdir(parents=True, exist_ok=True)
+        completed_summary=model_dir/"summary.json"
+        checkpoint=self._load_checkpoint(model_dir)
+        if checkpoint and checkpoint.get("phase")=="complete" and completed_summary.exists():
+            return json.loads(completed_summary.read_text(encoding="utf-8"))
+        client=self.client_factory(self.config.ollama_url)
+        if checkpoint and checkpoint.get("phase")=="ladder":
+            store=MemoryStore.from_dict(checkpoint["store"]); rows=checkpoint.get("rows", [])
+            start_level=int(checkpoint["completed_level"]); start_variant=int(checkpoint["completed_variant"])+1
+            if start_variant >= VARIANTS_PER_LEVEL:
+                start_level += 1; start_variant = 0
+            infra_failures=int(checkpoint.get("infra_failures",0))
+        else:
+            store=generate_bootstrap(self.config.seed); rows=[]; start_level=1; start_variant=0; infra_failures=0
+
+        # Complete the whole ladder. Never terminate on model capability failure.
+        for level in range(start_level, self.config.max_level+1):
+            existing=next((r for r in rows if r["level"]==level),None)
+            level_row=existing if existing is not None else {"level": level, "variants": []}
+            if existing is None: rows.append(level_row)
+            vstart=start_variant if level==start_level else 0
+            for variant in range(vstart,VARIANTS_PER_LEVEL):
+                tasks,sealed=build_level(self.config.seed,level,variant,store)
+                arms={}
+                for arm in ARMS:
+                    arms[arm]=self._run_arm(client,spec,model_dir,level,variant,tasks,sealed,store,arm)
+                    if arms[arm]["status"] not in {"OK","CONTEXT_CAP_REACHED"}: infra_failures += 1
+                rr=arms[ARM_RETRIEVED]; promoted=[]
+                if rr["status"]=="OK":
+                    promoted=promote_verified(store,tasks,rr["task_results"],level)
+                    for m in promoted:
+                        _jsonl(model_dir/"memory.jsonl", {"event":"macro_promoted", **asdict(m), "snapshot":store.fingerprint()})
+                level_row["variants"].append({"variant":variant,"arms":arms,"promoted":len(promoted)})
+                self._checkpoint(model_dir,{"phase":"ladder","completed_level":level,"completed_variant":variant,
+                    "memory_count":len(store.macros),"memory_fingerprint":store.fingerprint(),"store":store.to_dict(),
+                    "rows":rows,"infra_failures":infra_failures})
+            start_variant=0
+
+        frozen_fp=store.fingerprint(); titan=self._run_titan(client,spec,model_dir,store)
+        analysis={arm:characterize(rows,arm) for arm in ARMS}; paired=[]
+        for lr in rows:
+            for v in lr["variants"]:
+                n=v["arms"][ARM_NONE]; r=v["arms"][ARM_RETRIEVED]
+                if n["status"]==r["status"]=="OK": paired.append(r["accuracy"]-n["accuracy"])
+        ci=_ci95(paired)
+        summary={"model":asdict(spec),"levels_completed":len(rows),"variants_per_level":VARIANTS_PER_LEVEL,
+            "tasks_per_variant":TASKS_PER_VARIANT,"analysis":analysis,"final_memory_count":len(store.macros),
+            "final_memory_fingerprint":frozen_fp,"paired_retrieved_minus_none_mean":statistics.mean(paired) if paired else None,
+            "paired_gain_ci95":list(ci),"paired_packet_count":len(paired),"infrastructure_unscorable_count":infra_failures,
+            "titan":titan,"completed":True}
+        completed_summary.write_text(json.dumps(summary,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        self._checkpoint(model_dir,{"phase":"complete","completed":True,"memory_count":len(store.macros),"summary_hash":stable_hash(summary)})
+        return summary
+
+    def _build_titan(self, seed:int, store:MemoryStore) -> tuple[str,dict[str,Any]]:
+        rng=random.Random(seed^0x717A9)
+        rids=sorted(store.rules)
+        regs=[rng.randrange(MODULUS) for _ in range(8)]
+        ops=[]
+        # 40 rule-backed transforms, 8 joins, 4 branches, 3 guaranteed nested joins.
+        for i in range(40):
+            reg=i%8; rid=rng.choice(rids); regs[reg]=store.rules[rid].apply(regs[reg]); ops.append(("R",reg,rid))
+            if i in {4,9,14,19,24,29,34,39}:
+                a=(reg+1)%8; b=(reg+3)%8; regs[reg]=(regs[reg]+regs[a]*3+regs[b]*5)%MODULUS; ops.append(("J",reg,a,b))
+            if i in {9,19,29,39}:
+                other=(reg+2)%8
+                if regs[reg]%2==0: regs[reg]=(regs[reg]+regs[other])%MODULUS; branch="EVEN"
+                else: regs[reg]=(regs[reg]*2-regs[other])%MODULUS; branch="ODD"
+                ops.append(("B",reg,other,branch))
+        # guaranteed nested joins depending on already-joined state
+        for target,a,b in [(0,1,2),(3,0,4),(7,3,5)]:
+            regs[target]=(regs[target]+7*regs[a]+11*regs[b])%MODULUS; ops.append(("NJ",target,a,b))
+        final=sum((i+1)*x for i,x in enumerate(regs))%MODULUS
+        wrongs=[(final+1)%MODULUS,(final-1)%MODULUS,(final+regs[0])%MODULUS]
+        choices=_choices(final,wrongs,rng); answer=next(k for k,v in choices.items() if v==final)
+        return answer,{"initial":None,"ops":ops,"final_registers":regs,"final":final,"choices":choices}
+
+    def _titan_prompt(self, oracle:dict[str,Any], store:MemoryStore, arm:str) -> tuple[str,tuple[str,...]]:
+        macros=store.learned_macros()
+        if arm==TITAN_NONE: supplied=()
+        elif arm==TITAN_LIMITED: supplied=macros[-min(12,len(macros)):]
+        elif arm==TITAN_MAX: supplied=macros
+        else: raise ValueError(arm)
+        lines=["EXPERIMENT 007 TITAN — 70–100B-CLASS TARGET DIFFICULTY","All arithmetic modulo 997.","BASE RULEBOOK:"]
+        for rid in sorted(store.rules):
+            r=store.rules[rid]; lines.append(f"{rid}: next=({r.a}*current+{r.b}) mod 997")
+        lines.append(f"LEARNED MEMORY BUDGET: {arm}")
+        for m in supplied: lines.append(f"{m.macro_id}: {' -> '.join(m.rule_ids)}")
+        lines.append("PROGRAM:")
+        for op in oracle["ops"]:
+            if op[0]=="R": lines.append(f"R{op[1]} = {op[2]}(R{op[1]})")
+            elif op[0]=="J": lines.append(f"R{op[1]} = R{op[1]} + 3*R{op[2]} + 5*R{op[3]}")
+            elif op[0]=="B": lines.append(f"IF R{op[1]} even: R{op[1]}=R{op[1]}+R{op[2]}; ELSE R{op[1]}=2*R{op[1]}-R{op[2]}")
+            else: lines.append(f"R{op[1]} = R{op[1]} + 7*R{op[2]} + 11*R{op[3]}")
+        lines.append("FINAL = sum((index+1)*register[index]) mod 997")
+        lines.append("CHOICES " + " ".join(f"{k}:{v}" for k,v in oracle["choices"].items()))
+        lines.append("Return exactly one letter: <LETTER>")
+        return "\n".join(lines),tuple(m.macro_id for m in supplied)
+
+    def _run_titan(self,client:Any,spec:ModelSpec,model_dir:Path,store:MemoryStore)->dict[str,Any]:
+        answer,oracle=self._build_titan(self.config.seed,store)
+        out={"oracle_hash":stable_hash(oracle),"program_steps":len(oracle["ops"]),"branch_points":4,"cross_register_joins":8,"nested_joins":3,"attempts":{}}
+        for arm in TITAN_ARMS:
+            prompt,supplied=self._titan_prompt(oracle,store,arm); fits,pbytes,est=context_guard(prompt,spec.context_limit)
+            if not fits:
+                rec={"status":"CONTEXT_CAP_REACHED","correct":None,"memory_count":len(supplied),"prompt_bytes":pbytes,"estimated_prompt_tokens":est}
+            else:
+                result,failures=self._safe_generate(client,spec,prompt,self.config.seed+777777)
+                if result is None:
+                    rec={"status":"INFRASTRUCTURE_UNSCORABLE","correct":None,"memory_count":len(supplied),"retry_failures":failures}
+                else:
+                    m=re.fullmatch(r"\s*([ABCD])\s*",result.response or "",flags=re.I)
+                    rec={"status":"OK" if m else "FORMAT_UNSCORABLE","correct":bool(m and m.group(1).upper()==answer) if m else None,
+                         "prediction":m.group(1).upper() if m else None,"expected":answer,"memory_count":len(supplied),
+                         "prompt_tokens":getattr(result,"prompt_tokens",0),"eval_tokens":getattr(result,"eval_tokens",0),"wall_ms":getattr(result,"wall_ms",0.0)}
+            out["attempts"][arm]=rec; _jsonl(model_dir/"titan.jsonl",{"arm":arm,**rec,"oracle_hash":out["oracle_hash"]})
+        return out
+
+    def run_suite(self)->dict[str,Any]:
+        self.output_dir.mkdir(parents=True,exist_ok=True)
+        suite=[]
+        for spec in self.config.models:
+            if not spec.enabled: continue
+            try:
+                suite.append(self.run_model(spec))
+            except Exception as exc:
+                # Model-level catastrophe is recorded and the next model still runs.
+                failure={"model":asdict(spec),"completed":False,"suite_error":repr(exc)}
+                suite.append(failure); _jsonl(self.output_dir/"suite_failures.jsonl",failure)
+        result={"experiment_id":self.config.experiment_id,"models":suite,"suite_completed":True}
+        (self.output_dir/"suite_summary.json").write_text(json.dumps(result,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        return result
+
+
+def deterministic_audit(seed:int=20260828)->dict[str,Any]:
+    checks=[]
+    a=generate_bootstrap(seed); b=generate_bootstrap(seed)
+    checks.append(("bootstrap_deterministic",a.fingerprint()==b.fingerprint()))
+    for level in (1,8,16,24,32,40,48):
+        ta,sa=build_level(seed,level,0,a); tb,sb=build_level(seed,level,0,b)
+        checks.append((f"level_{level}_deterministic",ta==tb and sa==sb))
+        checks.append((f"level_{level}_unique_choices",all(len(set(t.choices.values()))==4 for t in ta)))
+        checks.append((f"level_{level}_depth",all(len(t.rule_ids)==level_depth(level) for t in ta)))
+    # Simulate perfect learning to stress memory growth and context split.
+    store=generate_bootstrap(seed)
+    for level in range(1,MAX_LEVEL+1):
+        for variant in range(VARIANTS_PER_LEVEL):
+            tasks,_=build_level(seed,level,variant,store)
+            promote_verified(store,tasks,[{"task_id":t.task_id,"verified_success":True} for t in tasks],level)
+    checks.append(("memory_scales_over_250_macros",len(store.macros)>250))
+    tasks,_=build_level(seed,MAX_LEVEL,0,store)
+    full=render_packet(tasks,store,ARM_FULL); ret=render_packet(tasks,store,ARM_RETRIEVED)
+    checks.append(("retrieval_is_smaller_than_full",len(ret[1])<len(full[1])))
+    checks.append(("retrieval_saves_steps",ret[3] < ret[2]))
+    # 50-seed generator/oracle audit.
+    for s in range(seed,seed+50):
+        st=generate_bootstrap(s)
+        for lvl in (1,12,24,36,48):
+            ts,sealed=build_level(s,lvl,1,st)
+            for t in ts:
+                correct=apply_rules(st,t.start,t.rule_ids)
+                ans=next(k for k,v in t.choices.items() if v==correct)
+                if ans!=sealed[t.task_id]: checks.append((f"oracle_{s}_{lvl}",False))
+    return {"passed":all(v for _,v in checks),"checks":[{"name":n,"passed":v} for n,v in checks],"perfect_learning_macro_count":len(store.macros)}
+
+
+def main(argv:list[str]|None=None)->int:
+    p=argparse.ArgumentParser(); p.add_argument("--config"); p.add_argument("--audit-only",action="store_true"); p.add_argument("--output-dir",default="results/007-final")
+    a=p.parse_args(argv)
+    if a.audit_only:
+        report=deterministic_audit(); print(json.dumps(report,indent=2)); return 0 if report["passed"] else 2
+    if not a.config: p.error("--config required unless --audit-only")
+    from .ollama import OllamaClient
+    cfg=SuiteConfig.from_json(Path(a.config)); runner=Final007Runner(cfg,OllamaClient,Path(a.output_dir)); print(json.dumps(runner.run_suite(),indent=2)); return 0
+
+if __name__=="__main__": raise SystemExit(main())
