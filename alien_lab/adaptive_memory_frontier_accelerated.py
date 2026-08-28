@@ -11,9 +11,9 @@ from .ollama import OllamaClient
 from .scoring_repair import StrictFinalAnswerClient
 
 
-# Twelve stages are enough to move from trivial three-rule composition to eighty dependent
-# applications while still leaving room for the three matched arms and occasional confirmation.
-# This is a preregistered schedule, not a performance-dependent difficulty change.
+# Twelve stages move from trivial three-rule composition to eighty dependent applications while
+# still leaving room for three matched arms and occasional same-level confirmation. This schedule
+# is preregistered and does not change in response to model performance.
 DEPTH_SCHEDULE = (3, 5, 8, 12, 17, 23, 30, 38, 47, 57, 68, 80)
 
 
@@ -52,6 +52,19 @@ class AcceleratedSafeRunner(safe.SafeAdaptiveMemoryRunner):
             "adaptive_to_model_results": False,
         }
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _aggregate_accuracy(self, arm: str) -> float | None:
+        # A legitimate retrieved-context boundary can stop a stage before controls run. Missing
+        # controls therefore mean "not measured", never a KeyError at summary time.
+        values: list[float] = []
+        for level in self.levels:
+            record = level.get("arms", {}).get(arm)
+            if not isinstance(record, dict):
+                continue
+            if record.get("status") != "OK" or record.get("accuracy") is None:
+                continue
+            values.append(float(record["accuracy"]))
+        return sum(values) / len(values) if values else None
 
 
 def _load_config(path: str) -> ExperimentConfig:
