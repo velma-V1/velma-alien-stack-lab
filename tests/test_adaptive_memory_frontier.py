@@ -14,6 +14,7 @@ from alien_lab.adaptive_memory_frontier import (
     composition_depth,
     deterministic_preflight,
     generate_rules,
+    promote_task_macros,
     render_memory_packet,
 )
 from alien_lab.experiment import ExperimentConfig
@@ -76,7 +77,41 @@ class AdaptiveMemoryDeterministicTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.append((first[0],))
 
-    def test_difficulty_increases_monotonically(self):
+    def test_successful_task_becomes_a_validated_macro_memory(self):
+        store = bootstrap_store(20260828)
+        tasks, _ = build_level_packet(20260828, 1, store, task_count=1)
+        task = tasks[0]
+        before = len(store)
+        promoted = promote_task_macros(
+            store,
+            tasks,
+            {task.task_id: True},
+            learned_level=1,
+        )
+        self.assertEqual(len(promoted), 1)
+        self.assertEqual(len(store), before + 1)
+        macro = promoted[0]
+        self.assertEqual(macro.learned_level, 1)
+        self.assertEqual(macro.evidence_id, task.task_id)
+        for start in (0, 1, 17, 96):
+            direct = start
+            for rule_id in task.rule_ids:
+                direct = store.get(rule_id).apply(direct)
+            self.assertEqual(macro.apply(start), direct)
+
+    def test_failed_task_is_never_promoted_to_memory(self):
+        store = bootstrap_store(20260828)
+        tasks, _ = build_level_packet(20260828, 1, store, task_count=2)
+        promoted = promote_task_macros(
+            store,
+            tasks,
+            {tasks[0].task_id: True, tasks[1].task_id: False},
+            learned_level=1,
+        )
+        self.assertEqual(len(promoted), 1)
+        self.assertEqual(promoted[0].evidence_id, tasks[0].task_id)
+
+    def test_difficulty_increases_monotonically_while_success_builds_memory(self):
         store = bootstrap_store(20260828)
         previous_count = 0
         previous_depth = 0
@@ -87,18 +122,22 @@ class AdaptiveMemoryDeterministicTests(unittest.TestCase):
             self.assertTrue(all(len(task.rule_ids) == composition_depth(level) for task in tasks))
             previous_count = len(store)
             previous_depth = composition_depth(level)
-            store.append(
-                generate_rules(
-                    20260828,
-                    start_index=len(store) + 1,
-                    count=12,
-                    learned_level=level,
-                )
+            promote_task_macros(
+                store,
+                tasks,
+                {task.task_id: True for task in tasks},
+                learned_level=level,
             )
 
     def test_tasks_have_unique_choices_and_use_only_prior_memory(self):
         store = bootstrap_store(20260828)
-        store.append(generate_rules(20260828, start_index=13, count=12, learned_level=1))
+        first_tasks, _ = build_level_packet(20260828, 1, store)
+        promote_task_macros(
+            store,
+            first_tasks,
+            {task.task_id: True for task in first_tasks},
+            learned_level=1,
+        )
         tasks, sealed = build_level_packet(20260828, 2, store)
         for task in tasks:
             self.assertEqual(len(set(task.choices.values())), 4)
@@ -131,7 +170,7 @@ class AdaptiveMemoryDeterministicTests(unittest.TestCase):
     def test_deterministic_preflight_catches_design_invariants(self):
         report = deterministic_preflight(20260828)
         self.assertTrue(report["passed"], report)
-        self.assertGreaterEqual(len(report["checks"]), 8)
+        self.assertGreaterEqual(len(report["checks"]), 10)
 
 
 class AdaptiveMemoryRunnerTests(unittest.TestCase):
@@ -191,9 +230,9 @@ class AdaptiveMemoryRunnerTests(unittest.TestCase):
 
     def test_full_context_cap_does_not_prevent_retrieved_arm(self):
         client = ScriptedClient([ok("1:A")])
-        tiny = self.config().__class__(**{**self.config().__dict__, "context_limit": 20})
+        bounded = self.config().__class__(**{**self.config().__dict__, "context_limit": 400})
         with tempfile.TemporaryDirectory() as root:
-            runner = AdaptiveMemoryRunner(tiny, client=client, output_dir=Path(root))
+            runner = AdaptiveMemoryRunner(bounded, client=client, output_dir=Path(root))
             runner._started = runner.clock()
             runner._deadline = runner._started + 600
             store = bootstrap_store(20260828)
