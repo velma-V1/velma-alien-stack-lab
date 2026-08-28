@@ -63,6 +63,21 @@ class ScoringRepairTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "UNSCORABLE")
 
+    def test_explanatory_text_is_unscorable_even_when_letters_can_be_found(self):
+        inner = StubInner(ModelResult(
+            status="OK",
+            response=VALID + " because these are my answers",
+            done_reason="stop",
+            eval_tokens=20,
+        ))
+        client = StrictFinalAnswerClient(inner)
+        prompt = "\n".join(f"TASK {i}\nX" for i in range(1, 7))
+        result = client.generate(
+            model="q", prompt=prompt, num_ctx=25600, num_predict=64,
+            temperature=0, seed=1, timeout_seconds=10,
+        )
+        self.assertEqual(result.status, "UNSCORABLE")
+
     def test_complete_packet_is_scorable(self):
         inner = StubInner(ModelResult(status="OK", response=VALID, done_reason="stop", eval_tokens=12))
         client = StrictFinalAnswerClient(inner)
