@@ -68,7 +68,14 @@ class Tests(unittest.TestCase):
             run=Final007Runner(cfg,ScriptClient,Path(td)); st=generate_bootstrap(cfg.seed)
             t,_=build_level(cfg.seed,1,0,st); promote_verified(st,t,[{"task_id":x.task_id,"verified_success":True} for x in t],1)
             res=run._run_titan(ScriptClient(''),cfg.models[0],Path(td),st)
-            self.assertEqual(set(res['attempts']),set(TITAN_ARMS)); self.assertGreaterEqual(res['program_steps'],55)
+            self.assertEqual(set(res['attempts']),set(TITAN_ARMS))
+            self.assertGreaterEqual(res['raw_rule_applications'],40)
+            self.assertGreaterEqual(res['macro_slots'],1)
+            none=res['attempts'][TITAN_NONE]; limited=res['attempts'][TITAN_LIMITED]; maximum=res['attempts'][TITAN_MAX]
+            self.assertEqual(none['memory_count'],0)
+            self.assertGreater(limited['memory_count'],0)
+            self.assertLessEqual(limited['rendered_program_steps'], none['rendered_program_steps'])
+            self.assertLessEqual(maximum['rendered_program_steps'], limited['rendered_program_steps'])
     def test_checkpoint_atomic_and_written_each_variant(self):
         cfg=SuiteConfig('x',(ModelSpec('m','m'),),max_level=1)
         # model answers may be wrong; run must still complete
