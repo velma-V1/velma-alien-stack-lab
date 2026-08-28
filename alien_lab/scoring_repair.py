@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +20,12 @@ class StrictFinalAnswerClient:
 
     Experiments 001-002 proved that think=True plus a short num_predict budget
     can consume the entire generation budget in Ollama's `thinking` field while
-    leaving `response` blank.  The base evaluator parses only `response`, so
+    leaving `response` blank. The base evaluator parses only `response`, so
     those runs cannot be classified as wrong answers.
 
     This wrapper forces think=False for the capability-validation path and
     changes status from OK to UNSCORABLE whenever the final response is blank,
-    incomplete for the packet, or hits the generation ceiling.
+    violates the exact packet-output contract, or hits the generation ceiling.
     """
 
     def __init__(self, inner: OllamaClient) -> None:
@@ -45,9 +45,11 @@ class StrictFinalAnswerClient:
 
     @staticmethod
     def _complete_response(response: str | None, task_count: int) -> bool:
-        ids = [f"preflight-{i}" for i in range(1, task_count + 1)]
-        parsed = parse_packet_response(response, ids)
-        return bool(response and response.strip()) and all(parsed[x] is not None for x in ids)
+        if not response or not response.strip():
+            return False
+        parts = [rf"{i}\s*:\s*[ABCD]" for i in range(1, task_count + 1)]
+        pattern = r"^\s*" + r"\s+".join(parts) + r"\s*$"
+        return re.fullmatch(pattern, response, flags=re.IGNORECASE) is not None
 
     def generate(self, **kwargs) -> ModelResult:
         call = dict(kwargs)
@@ -67,9 +69,16 @@ class ScoringRepairRunner(ExperimentRunner):
     """One-cube validation runner with a mandatory live scoring preflight."""
 
     def _can_start_optional(self) -> bool:
-        # Experiment 003 exists only to prove scoring integrity.  Do not spend
+        # Experiment 003 exists only to prove scoring integrity. Do not spend
         # model time on optional scientific phases until the evaluator is valid.
         return False
+
+    def _execute_packet(self, *args, **kwargs) -> bool:
+        before = len(self.records)
+        completed = super()._execute_packet(*args, **kwargs)
+        if len(self.records) > before and self.records[-1].status == "UNSCORABLE":
+            return False
+        return completed
 
     def preflight(self) -> dict[str, Any]:
         if self.client is None:
