@@ -67,64 +67,105 @@
     def _build_titan(self, seed:int, store:MemoryStore) -> tuple[str,dict[str,Any]]:
         rng=random.Random(seed^0x717A9)
         rids=sorted(store.rules)
-        regs=[rng.randrange(MODULUS) for _ in range(8)]
-        ops=[]
-        # 40 rule-backed transforms, 8 joins, 4 branches, 3 guaranteed nested joins.
-        for i in range(40):
-            reg=i%8; rid=rng.choice(rids); regs[reg]=store.rules[rid].apply(regs[reg]); ops.append(("R",reg,rid))
-            if i in {4,9,14,19,24,29,34,39}:
-                a=(reg+1)%8; b=(reg+3)%8; regs[reg]=(regs[reg]+regs[a]*3+regs[b]*5)%MODULUS; ops.append(("J",reg,a,b))
-            if i in {9,19,29,39}:
+        initial=[rng.randrange(MODULUS) for _ in range(8)]
+        regs=list(initial); ops=[]
+        macros=list(store.learned_macros())
+        # Force learned structures into the raw program when available. The oracle
+        # always executes the underlying base-rule sequences, never macro labels.
+        chosen=[]
+        if macros:
+            strata=[]
+            levels=sorted({m.learned_level for m in macros})
+            for lev in (levels[0], levels[len(levels)//2], levels[-1]):
+                strata.extend([m for m in macros if m.learned_level==lev][:4])
+            seen=set()
+            for m in strata + macros:
+                if m.macro_id not in seen:
+                    chosen.append(m); seen.add(m.macro_id)
+                if len(chosen)>=12: break
+        # Twelve macro-backed sequence slots (or base sequences when memory is sparse).
+        for i in range(12):
+            reg=i%8
+            if i < len(chosen):
+                seq=chosen[i].rule_ids; macro_id=chosen[i].macro_id
+            else:
+                seq=tuple(rng.choice(rids) for _ in range(3)); macro_id=None
+            for rid in seq: regs[reg]=store.rules[rid].apply(regs[reg])
+            ops.append(("SEQ",reg,tuple(seq),macro_id))
+        # Additional raw transformations keep Titan hard even if macros are long.
+        for i in range(16):
+            reg=(i+3)%8; rid=rng.choice(rids); regs[reg]=store.rules[rid].apply(regs[reg]); ops.append(("R",reg,rid))
+        # Eight cross-register joins and four state-dependent branches.
+        for j in range(8):
+            reg=j%8; a=(reg+1)%8; b=(reg+3)%8
+            regs[reg]=(regs[reg]+regs[a]*3+regs[b]*5)%MODULUS; ops.append(("J",reg,a,b))
+            if j in {1,3,5,7}:
                 other=(reg+2)%8
                 if regs[reg]%2==0: regs[reg]=(regs[reg]+regs[other])%MODULUS; branch="EVEN"
                 else: regs[reg]=(regs[reg]*2-regs[other])%MODULUS; branch="ODD"
                 ops.append(("B",reg,other,branch))
-        # guaranteed nested joins depending on already-joined state
+        # Three guaranteed nested joins depend on earlier joined/branched state.
         for target,a,b in [(0,1,2),(3,0,4),(7,3,5)]:
             regs[target]=(regs[target]+7*regs[a]+11*regs[b])%MODULUS; ops.append(("NJ",target,a,b))
         final=sum((i+1)*x for i,x in enumerate(regs))%MODULUS
         wrongs=[(final+1)%MODULUS,(final-1)%MODULUS,(final+regs[0])%MODULUS]
         choices=_choices(final,wrongs,rng); answer=next(k for k,v in choices.items() if v==final)
-        return answer,{"initial":None,"ops":ops,"final_registers":regs,"final":final,"choices":choices}
+        raw_rule_apps=sum(len(op[2]) if op[0]=="SEQ" else 1 if op[0]=="R" else 0 for op in ops)
+        return answer,{"initial":initial,"ops":ops,"final_registers":regs,"final":final,"choices":choices,
+                      "raw_rule_applications":raw_rule_apps,"macro_slots":len(chosen)}
 
-    def _titan_prompt(self, oracle:dict[str,Any], store:MemoryStore, arm:str) -> tuple[str,tuple[str,...]]:
+    def _titan_prompt(self, oracle:dict[str,Any], store:MemoryStore, arm:str) -> tuple[str,tuple[str,...],int]:
         macros=store.learned_macros()
-        if arm==TITAN_NONE: supplied=()
-        elif arm==TITAN_LIMITED: supplied=macros[-min(12,len(macros)):]
-        elif arm==TITAN_MAX: supplied=macros
+        referenced=[op[3] for op in oracle["ops"] if op[0]=="SEQ" and op[3] is not None]
+        if arm==TITAN_NONE:
+            supplied=()
+        elif arm==TITAN_LIMITED:
+            limited=set(referenced[:12]); supplied=tuple(m for m in macros if m.macro_id in limited)
+        elif arm==TITAN_MAX:
+            relevant=set(referenced); supplied=tuple(m for m in macros if m.macro_id in relevant)
         else: raise ValueError(arm)
+        supplied_ids={m.macro_id for m in supplied}
         lines=["EXPERIMENT 007 TITAN — 70–100B-CLASS TARGET DIFFICULTY","All arithmetic modulo 997.","BASE RULEBOOK:"]
         for rid in sorted(store.rules):
             r=store.rules[rid]; lines.append(f"{rid}: next=({r.a}*current+{r.b}) mod 997")
         lines.append(f"LEARNED MEMORY BUDGET: {arm}")
-        for m in supplied: lines.append(f"{m.macro_id}: {' -> '.join(m.rule_ids)}")
+        for m in supplied: lines.append(f"{m.macro_id}: expands exactly to {' -> '.join(m.rule_ids)}")
+        lines.append("INITIAL REGISTERS: " + " ".join(f"R{i}={v}" for i,v in enumerate(oracle["initial"])))
         lines.append("PROGRAM:")
+        rendered_steps=0
         for op in oracle["ops"]:
-            if op[0]=="R": lines.append(f"R{op[1]} = {op[2]}(R{op[1]})")
-            elif op[0]=="J": lines.append(f"R{op[1]} = R{op[1]} + 3*R{op[2]} + 5*R{op[3]}")
-            elif op[0]=="B": lines.append(f"IF R{op[1]} even: R{op[1]}=R{op[1]}+R{op[2]}; ELSE R{op[1]}=2*R{op[1]}-R{op[2]}")
-            else: lines.append(f"R{op[1]} = R{op[1]} + 7*R{op[2]} + 11*R{op[3]}")
+            if op[0]=="SEQ":
+                reg,seq,mid=op[1],op[2],op[3]
+                if mid and mid in supplied_ids:
+                    lines.append(f"R{reg} = {mid}(R{reg})"); rendered_steps += 1
+                else:
+                    for rid in seq:
+                        lines.append(f"R{reg} = {rid}(R{reg})"); rendered_steps += 1
+            elif op[0]=="R": lines.append(f"R{op[1]} = {op[2]}(R{op[1]})"); rendered_steps += 1
+            elif op[0]=="J": lines.append(f"R{op[1]} = R{op[1]} + 3*R{op[2]} + 5*R{op[3]}"); rendered_steps += 1
+            elif op[0]=="B": lines.append(f"IF R{op[1]} even: R{op[1]}=R{op[1]}+R{op[2]}; ELSE R{op[1]}=2*R{op[1]}-R{op[2]}"); rendered_steps += 1
+            else: lines.append(f"R{op[1]} = R{op[1]} + 7*R{op[2]} + 11*R{op[3]}"); rendered_steps += 1
         lines.append("FINAL = sum((index+1)*register[index]) mod 997")
         lines.append("CHOICES " + " ".join(f"{k}:{v}" for k,v in oracle["choices"].items()))
         lines.append("Return exactly one letter: <LETTER>")
-        return "\n".join(lines),tuple(m.macro_id for m in supplied)
+        return "\n".join(lines),tuple(m.macro_id for m in supplied),rendered_steps
 
     def _run_titan(self,client:Any,spec:ModelSpec,model_dir:Path,store:MemoryStore)->dict[str,Any]:
         answer,oracle=self._build_titan(self.config.seed,store)
-        out={"oracle_hash":stable_hash(oracle),"program_steps":len(oracle["ops"]),"branch_points":4,"cross_register_joins":8,"nested_joins":3,"attempts":{}}
+        out={"oracle_hash":stable_hash(oracle),"program_steps":len(oracle["ops"]),"branch_points":4,"cross_register_joins":8,"nested_joins":3,"raw_rule_applications":oracle["raw_rule_applications"],"macro_slots":oracle["macro_slots"],"attempts":{}}
         for arm in TITAN_ARMS:
-            prompt,supplied=self._titan_prompt(oracle,store,arm); fits,pbytes,est=context_guard(prompt,spec.context_limit)
+            prompt,supplied,rendered_steps=self._titan_prompt(oracle,store,arm); fits,pbytes,est=context_guard(prompt,spec.context_limit)
             if not fits:
-                rec={"status":"CONTEXT_CAP_REACHED","correct":None,"memory_count":len(supplied),"prompt_bytes":pbytes,"estimated_prompt_tokens":est}
+                rec={"status":"CONTEXT_CAP_REACHED","correct":None,"memory_count":len(supplied),"prompt_bytes":pbytes,"estimated_prompt_tokens":est,"rendered_program_steps":rendered_steps}
             else:
                 result,failures=self._safe_generate(client,spec,prompt,self.config.seed+777777)
                 if result is None:
-                    rec={"status":"INFRASTRUCTURE_UNSCORABLE","correct":None,"memory_count":len(supplied),"retry_failures":failures}
+                    rec={"status":"INFRASTRUCTURE_UNSCORABLE","correct":None,"memory_count":len(supplied),"retry_failures":failures,"rendered_program_steps":rendered_steps}
                 else:
                     m=re.fullmatch(r"\s*([ABCD])\s*",result.response or "",flags=re.I)
                     rec={"status":"OK" if m else "FORMAT_UNSCORABLE","correct":bool(m and m.group(1).upper()==answer) if m else None,
                          "prediction":m.group(1).upper() if m else None,"expected":answer,"memory_count":len(supplied),
-                         "prompt_tokens":getattr(result,"prompt_tokens",0),"eval_tokens":getattr(result,"eval_tokens",0),"wall_ms":getattr(result,"wall_ms",0.0)}
+                         "prompt_tokens":getattr(result,"prompt_tokens",0),"eval_tokens":getattr(result,"eval_tokens",0),"wall_ms":getattr(result,"wall_ms",0.0),"rendered_program_steps":rendered_steps}
             out["attempts"][arm]=rec; _jsonl(model_dir/"titan.jsonl",{"arm":arm,**rec,"oracle_hash":out["oracle_hash"]})
         return out
 
