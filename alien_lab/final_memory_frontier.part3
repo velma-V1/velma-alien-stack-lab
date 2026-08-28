@@ -82,9 +82,9 @@
             for m in strata + macros:
                 if m.macro_id not in seen:
                     chosen.append(m); seen.add(m.macro_id)
-                if len(chosen)>=12: break
-        # Twelve macro-backed sequence slots (or base sequences when memory is sparse).
-        for i in range(12):
+                if len(chosen)>=24: break
+        # Twenty-four macro-backed sequence slots (or base sequences when memory is sparse).
+        for i in range(24):
             reg=i%8
             if i < len(chosen):
                 seq=chosen[i].rule_ids; macro_id=chosen[i].macro_id
@@ -120,7 +120,7 @@
         if arm==TITAN_NONE:
             supplied=()
         elif arm==TITAN_LIMITED:
-            limited=set(referenced[:12]); supplied=tuple(m for m in macros if m.macro_id in limited)
+            limited_count=max(1,min(12,len(referenced)//2)) if referenced else 0; limited=set(referenced[:limited_count]); supplied=tuple(m for m in macros if m.macro_id in limited)
         elif arm==TITAN_MAX:
             relevant=set(referenced); supplied=tuple(m for m in macros if m.macro_id in relevant)
         else: raise ValueError(arm)
