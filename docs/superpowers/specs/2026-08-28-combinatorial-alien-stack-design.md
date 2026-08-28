@@ -199,16 +199,18 @@ The compiler sees typed observations but never expected answers.
 
 ## Time-budgeted scheduler
 
-The user requested a roughly 30–40 minute experiment. Runtime varies with model generation behavior, so the harness uses a target and hard wall-clock limit.
+The experiment has a one-hour wall-clock ceiling. Runtime varies with model generation behavior, so the harness uses a target plus an absolute cap.
 
 Default:
 
-- target: 35 minutes
-- hard stop for starting optional work: 40 minutes
+- target: 55 minutes
+- absolute ceiling: 60 minutes
 
-Required causal phases run first. Optional replicates, order checks, and compute-sweep repetitions are scheduled only when rolling throughput predicts that they fit.
+Required causal phases run first. Remaining time is used adaptively for additional discovery replicates, held-out transfer, order checks, compute-substitution sweeps, and adversarial controls.
 
-The harness never kills an in-flight Ollama generation solely to hit the target; it stops scheduling new optional runs.
+The scheduler must not start optional work unless the rolling high-percentile duration estimate plus a safety margin fits inside the remaining wall-clock budget. Any run terminated by the absolute ceiling is recorded explicitly as `TIME_BUDGET_ABORT` and never counted as a normal model failure.
+
+The extra runtime is for broader causal coverage and replication, not automatically for larger neural reasoning budgets.
 
 ## Permanent run record
 
@@ -252,6 +254,7 @@ Preserve evidence for later attribution to at least:
 - LOOPING
 - OUTPUT_ERROR
 - COMPILER_ERROR
+- TIME_BUDGET_ABORT
 
 Failure labels may be added after the run by an independent auditor. Raw evidence is immutable.
 
