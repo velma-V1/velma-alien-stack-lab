@@ -1,0 +1,16 @@
+{
+  "experiment_id": "007-final-model-memory-frontier",
+  "seed": 20260828,
+  "ollama_url": "http://localhost:11434",
+  "max_level": 48,
+  "call_timeout_seconds": 600,
+  "retry_count": 3,
+  "models": [
+    {"model": "qwen3.5:9b", "label": "qwen3.5-9b", "quantization": "as-installed", "context_limit": 25600, "output_budget": 96, "temperature": 0.0},
+    {"model": "qwen3:14b", "label": "qwen3-14b", "quantization": "as-installed", "context_limit": 25600, "output_budget": 96, "temperature": 0.0},
+    {"model": "qwen2.5-coder:14b", "label": "qwen2.5-coder-14b", "quantization": "as-installed", "context_limit": 25600, "output_budget": 96, "temperature": 0.0},
+    {"model": "qwen3.8:27b", "label": "qwen3.8-27b", "quantization": "Q4_K_M-default", "context_limit": 25600, "output_budget": 96, "temperature": 0.0},
+    {"model": "devstral-small-2:24b", "label": "devstral-small-2-24b-clean", "quantization": "as-installed", "context_limit": 25600, "output_budget": 96, "temperature": 0.0},
+    {"model": "AliBilge/Huihui-Devstral-Small-2-24B-Instruct-2512-abliterated:q4_k_m", "label": "devstral-small-2-24b-abliterated", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 96, "temperature": 0.0}
+  ]
+}
