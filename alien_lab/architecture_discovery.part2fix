@@ -1,0 +1,44 @@
+
+# Live-model format hardening. Accept exactly one standard Markdown JSON fence
+# as a lossless transport wrapper; never extract JSON from surrounding prose.
+def _load_json_object_strict_or_fenced(text: str | None) -> dict[str, Any] | None:
+    if not text:
+        return None
+    payload = text.strip()
+    if payload.startswith("```"):
+        lines = payload.splitlines()
+        if len(lines) < 3 or lines[-1].strip() != "```":
+            return None
+        opener = lines[0].strip().lower()
+        if opener not in {"```", "```json"}:
+            return None
+        payload = "\n".join(lines[1:-1]).strip()
+        if "```" in payload:
+            return None
+    try:
+        doc = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def parse_plan(text: str | None) -> list[str] | None:
+    doc = _load_json_object_strict_or_fenced(text)
+    if doc is None:
+        return None
+    plan = doc.get("plan")
+    if not isinstance(plan, list) or not plan or not all(isinstance(x, str) for x in plan):
+        return None
+    return plan
+
+
+def parse_audit(text: str | None) -> tuple[str | None, list[str] | None]:
+    doc = _load_json_object_strict_or_fenced(text)
+    if doc is None:
+        return None, None
+    decision = doc.get("decision")
+    if decision == "APPROVE":
+        return decision, None
+    if decision == "REJECT" and isinstance(doc.get("plan"), list) and all(isinstance(x, str) for x in doc["plan"]):
+        return decision, doc["plan"]
+    return None, None
