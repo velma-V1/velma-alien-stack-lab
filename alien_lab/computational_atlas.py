@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .computational_atlas_engines import CAPABILITIES, run_engine
+from .computational_atlas_models import build_production_fitness_record, unavailable_model_evidence
+from .computational_atlas_report import build_discovery_report
 from .computational_atlas_types import AtlasCell, stable_hash
 from .computational_atlas_worlds import World, build_worlds
 
@@ -176,6 +178,7 @@ def diagnose_rescue(original_success: bool, rescue_results: dict[str, bool]) -> 
 def _phase_maps(evidence: list[dict[str, Any]], worlds_by_id: dict[str, World]) -> dict[str, Any]:
     phase_b = [item["payload"] for item in evidence if item["payload"]["cell"]["phase"] == "B_ORACLE_CEILING"]
     full = [item for item in phase_b if item["cell"]["arm"] == "FULL"]
+    full_success = sum(int(item["score"] == 1) for item in full)
     coverage_by_family: dict[str, dict[str, int]] = {}
     for item in full:
         world = worlds_by_id[item["cell"]["world_id"]]
@@ -185,11 +188,15 @@ def _phase_maps(evidence: list[dict[str, Any]], worlds_by_id: dict[str, World]) 
         bucket["outside_basis"] += int(world.outside_basis)
 
     leave_one_out: dict[str, dict[str, int]] = {}
+    unique_value: dict[str, dict[str, float | int]] = {}
     for removed in ALL_CAPABILITIES:
         rows = [item for item in phase_b if item["cell"]["arm"] == f"WITHOUT_{removed}"]
-        leave_one_out[removed] = {
-            "success": sum(int(item["score"] == 1) for item in rows),
-            "total": len(rows),
+        success = sum(int(item["score"] == 1) for item in rows)
+        leave_one_out[removed] = {"success": success, "total": len(rows)}
+        unique_value[removed] = {
+            "lost_successes_without_engine": max(0, full_success - success),
+            "full_successes": full_success,
+            "effect_rate": (max(0, full_success - success) / len(full)) if full else 0.0,
         }
 
     phase_a = [item["payload"] for item in evidence if item["payload"]["cell"]["phase"] == "A_ATTRIBUTION"]
@@ -208,8 +215,28 @@ def _phase_maps(evidence: list[dict[str, Any]], worlds_by_id: dict[str, World]) 
     return {
         "computational_coverage": coverage_by_family,
         "leave_one_out": leave_one_out,
+        "unique_engine_value": unique_value,
         "minimum_basis": minimal_basis,
+        "full_successes": full_success,
+        "full_total": len(full),
     }
+
+
+def _production_records(phase_maps: dict[str, Any], worlds: list[World]) -> list[dict[str, Any]]:
+    records = []
+    unique = phase_maps.get("unique_engine_value", {})
+    for capability in ALL_CAPABILITIES:
+        value = unique.get(capability, {})
+        contribution = float(value.get("effect_rate", 0.0))
+        domains = sorted({world.family for world in worlds if capability in world.required_capabilities})
+        records.append(build_production_fitness_record(
+            capability=capability,
+            contribution=contribution,
+            domains=domains,
+            model_calls_displaced=0.0,
+            confidence="REFERENCE_ATLAS_EVIDENCE",
+        ))
+    return records
 
 
 def run_experiment(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
@@ -244,10 +271,18 @@ def run_experiment(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
     payload_hashes = [item["sha256"] for item in sorted(evidence, key=lambda item: item["payload"]["cell"]["order"])]
     invalid = [item for item in evidence if item["payload"]["score"] is None]
     verified = sum(int(item["payload"]["score"] == 1) for item in evidence)
-    maps = _phase_maps(evidence, worlds_by_id)
+    phase_maps = _phase_maps(evidence, worlds_by_id)
+    discovery_report = build_discovery_report(worlds=worlds, phase_maps=phase_maps)
+    production_records = _production_records(phase_maps, worlds)
+
+    profile = str(config["profile"])
+    live_phase_evidence: list[dict[str, Any]] = []
+    if profile in {"local", "frontier"}:
+        live_phase_evidence.append(unavailable_model_evidence(profile, "provider-neutral hook present; no live provider configured in deterministic runner"))
+
     summary = {
         "experiment": config["experiment"],
-        "profile": config["profile"],
+        "profile": profile,
         "conclusion": "DISCOVERY_COMPLETE" if not invalid and len(evidence) == len(ledger) else "PARTIAL_INVALID_EVIDENCE",
         "expected_cells": len(ledger),
         "terminal_cells": len(evidence),
@@ -257,8 +292,19 @@ def run_experiment(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         "model_calls": sum(int(item["payload"].get("model_calls", 0)) for item in evidence),
         "ledger_hash": ledger_hash,
         "replay_fingerprint": stable_hash(payload_hashes),
-        "maps": maps,
+        "maps": discovery_report["maps"],
+        "discovery_report": discovery_report,
+        "production_fitness_records": production_records,
+        "question_coverage": {
+            "mandatory_32": 32,
+            "tribunal_q0_q36": 37,
+            "generated_from_evidence_where_available": True,
+            "pending_live_sections_remain_explicit": True,
+        },
+        "live_phase_evidence": live_phase_evidence,
     }
+    atomic_json(output_dir / "discovery-report.json", discovery_report)
+    atomic_json(output_dir / "production-fitness.json", production_records)
     atomic_json(output_dir / "summary.json", summary)
     return summary
 
