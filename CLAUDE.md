@@ -71,6 +71,34 @@ G_H_I:
     preregistered definitions/ledgers MAY exist
     live/system implementation MUST NOT proceed until GPT+user explicitly advance after evidence review
 
+## Claude usage discipline
+
+CLAUDE_ROLE := "scarce independent adversarial reviewer"
+GPT_ROLE := "primary 010 engineer + first-pass verifier"
+DATA_ROLE := "scientific authority"
+
+DEFAULT_STATE := HOLD
+
+USE_CLAUDE_ONLY_IF:
+    CURRENT_TASK explicitly names a major audit gate
+    AND GPT+user intentionally authorize that run
+
+RESERVED_MAJOR_GATES:
+    1. final narrow red-team immediately before first accepted live C/D evidence
+    2. major C-F architecture tribunal before designing live G/H/I mechanisms
+
+WHEN_RUNNING:
+    obey READ_ONLY/READ_FIRST scope exactly
+    DO_NOT broaden repository exploration without evidence that scope is insufficient
+    DO_NOT reread experiments/001-009 unless explicitly required
+    DO_NOT run whole-repo analysis when targeted tests answer the question
+    prioritize falsification over implementation
+    return bounded findings rather than exhaustive commentary
+
+IF CURRENT_TASK says HOLD:
+    DO_NOT begin a repository audit
+    return HOLD_NO_CLAUDE_RUN_REQUIRED
+
 ## Context discipline
 
 BEFORE_READING:
