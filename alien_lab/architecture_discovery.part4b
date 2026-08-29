@@ -1,0 +1,105 @@
+                if plan is None and arch.velma:
+                    pass
+                elif plan is None:
+                    outcome = ExecutionOutcome(CellStatus.SAFE_HALT, 0, False, False, False, True, (), (), err)
+                    after = state.to_dict(); ev = TrialEvidence(cell.cell_id, cell.order, cell.state_key, outcome.status.value, outcome.score, cell.phase, cell.model, asdict(arch),
+                        task.public_dict(), task.oracle_hash, before, after, before_fp, state.fingerprint(), 0, 0, 0, 0.0,
+                        [m.record_id for m in retrieved], skill_id, rungs, None, None, [], False, False, False, True, [], err); self.store.write(ev); return ev
+        if plan is None:
+            call = gateway.generate(render_planner_prompt(task, retrieved), cell.seed + cell.order)
+            st = _status_from_model(call)
+            if st:
+                ev = self._invalid_evidence(cell, task, state, st, call.error or call.status, calls_before, gateway); self.store.write(ev); return ev
+            plan = parse_plan(call.response); ptok += call.prompt_tokens; etok += call.eval_tokens; wall += call.wall_ms
+            if plan is None:
+                ev = self._invalid_evidence(cell, task, state, CellStatus.FORMAT_UNSCORABLE, call.response or "empty", calls_before, gateway); self.store.write(ev); return ev
+        if arch.openadapt and arch.openadapt_location == "AFTER_PLAN_LOOKUP_POSTVERIFY_COMPILE":
+            skill = state.skills.match(task)
+            if skill:
+                resolved, rungs, err = state.skills.resolve(task, skill); skill_id = skill.skill_id
+                if resolved is not None:
+                    plan = resolved
+                elif not arch.velma:
+                    outcome = ExecutionOutcome(CellStatus.SAFE_HALT, 0, False, False, False, True, (), (), err)
+                    after = state.to_dict(); ev = TrialEvidence(cell.cell_id, cell.order, cell.state_key, outcome.status.value, outcome.score, cell.phase, cell.model, asdict(arch),
+                        task.public_dict(), task.oracle_hash, before, after, before_fp, state.fingerprint(), len(gateway.calls)-calls_before, ptok, etok, wall,
+                        [m.record_id for m in retrieved], skill_id, rungs, plan, None, [], False, False, False, True, gateway.calls[calls_before:], err); self.store.write(ev); return ev
+
+        if arch.alien and arch.alien_location == "POST_PLAN_REFINE":
+            retrieved = state.memory.retrieve(task)
+            if retrieved:
+                call = gateway.generate(render_planner_prompt(task, retrieved, repair="Refine the candidate using verified cognition: " + json.dumps(plan)), cell.seed + cell.order + 31)
+                st = _status_from_model(call)
+                if st:
+                    ev = self._invalid_evidence(cell, task, state, st, call.error or call.status, calls_before, gateway); self.store.write(ev); return ev
+                refined = parse_plan(call.response); ptok += call.prompt_tokens; etok += call.eval_tokens; wall += call.wall_ms
+                if refined: plan = refined
+        if arch.velma and arch.velma_verification in {"PRE_EXEC_AUDIT", "BOTH"}:
+            audit_call = gateway.generate(render_auditor_prompt(task, plan), cell.seed + cell.order + 71)
+            st = _status_from_model(audit_call)
+            if st:
+                ev = self._invalid_evidence(cell, task, state, st, audit_call.error or audit_call.status, calls_before, gateway); self.store.write(ev); return ev
+            decision, replacement = parse_audit(audit_call.response); ptok += audit_call.prompt_tokens; etok += audit_call.eval_tokens; wall += audit_call.wall_ms
+            if decision is None:
+                ev = self._invalid_evidence(cell, task, state, CellStatus.FORMAT_UNSCORABLE, audit_call.response or "bad audit", calls_before, gateway); self.store.write(ev); return ev
+            if decision == "REJECT" and replacement: plan = replacement
+        if arch.openadapt and arch.openadapt_location == "RESOLVER_POSTVERIFY_COMPILE":
+            skill = state.skills.match(task)
+            if skill:
+                resolved, rungs, err = state.skills.resolve(task, skill); skill_id = skill.skill_id
+                if resolved is not None:
+                    plan = resolved
+        outcome = execute_plan(task, plan)
+        if arch.openadapt and arch.openadapt_location == "REPAIR_ONLY" and not outcome.verified_success:
+            skill = state.skills.match(task)
+            if skill:
+                resolved, rungs, err = state.skills.resolve(task, skill); skill_id = skill.skill_id
+                if resolved is not None:
+                    plan = resolved; outcome = execute_plan(task, plan)
+        if arch.velma and not outcome.verified_success and arch.alien_location in {"REPAIR_ONLY", "PRE_REASON_REPAIR", "PRE_REASON_REPAIR_POSTVERIFY_LEARN"}:
+            repmem = state.memory.retrieve(task) if arch.alien else []
+            repair_call = gateway.generate(render_planner_prompt(task, repmem, repair=outcome.error or "verification failure"), cell.seed + cell.order + 101)
+            st = _status_from_model(repair_call)
+            if st is None:
+                repaired = parse_plan(repair_call.response); ptok += repair_call.prompt_tokens; etok += repair_call.eval_tokens; wall += repair_call.wall_ms
+                if repaired: plan = repaired; outcome = execute_plan(task, plan)
+        if outcome.screen_success and not outcome.authoritative_success:
+            if arch.openadapt:
+                outcome = ExecutionOutcome(CellStatus.SAFE_HALT, 0, False, True, False, True, outcome.semantics, outcome.locators, "OPENADAPT_EFFECT_VERIFIER_CAUGHT_FALSE_SUCCESS")
+            elif arch.velma and arch.velma_verification in {"POST_EFFECT_AUDIT", "BOTH"}:
+                outcome = ExecutionOutcome(CellStatus.SAFE_HALT, 0, False, True, False, True, outcome.semantics, outcome.locators, "VELMA_AUDITOR_CAUGHT_FALSE_SUCCESS")
+        verified = bool(outcome.verified_success)
+        unsafe_learn = arch.alien_location == "PREVERIFY_LEARN_NEGATIVE_CONTROL"
+        if arch.alien and (verified or unsafe_learn) and arch.alien_location in {"PRE_REASON_REPAIR_POSTVERIFY_LEARN", "PREVERIFY_LEARN_NEGATIVE_CONTROL"}:
+            state.memory.promote(task, outcome.semantics, cell.cell_id, verified or unsafe_learn)
+        unsafe_compile = arch.openadapt_location == "PREVERIFY_COMPILE_NEGATIVE_CONTROL"
+        if arch.openadapt and (verified or unsafe_compile) and arch.openadapt_location in {"EARLY_LOOKUP_POSTVERIFY_COMPILE", "AFTER_PLAN_LOOKUP_POSTVERIFY_COMPILE", "RESOLVER_POSTVERIFY_COMPILE", "POSTVERIFY_COMPILE_ONLY", "PREVERIFY_COMPILE_NEGATIVE_CONTROL"}:
+            state.skills.compile_verified(task, outcome.semantics, outcome.locators, cell.cell_id, verified or unsafe_compile)
+        after = state.to_dict(); after_fp = state.fingerprint(); self.states[cell.state_key] = state
+        ev = TrialEvidence(cell.cell_id, cell.order, cell.state_key, outcome.status.value, outcome.score, cell.phase, cell.model, asdict(arch), task.public_dict(), task.oracle_hash,
+                           before, after, before_fp, after_fp, len(gateway.calls)-calls_before, ptok, etok, wall,
+                           [m.record_id for m in retrieved], skill_id, rungs, plan, plan, list(outcome.semantics), outcome.screen_success,
+                           outcome.authoritative_success, outcome.verified_success, outcome.safe_halt, gateway.calls[calls_before:], outcome.error)
+        self.store.write(ev); return ev
+
+    def run(self, ledger: list[LedgerCell]) -> dict[str, Any]:
+        ledger_payload = [asdict(c) for c in ledger]
+        ledger_hash = stable_hash(ledger_payload)
+        manifest_path = self.output_dir / "ledger-manifest.json"
+        if manifest_path.exists():
+            existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if existing.get("ledger_hash") != ledger_hash:
+                raise RuntimeError("OUTPUT_DIRECTORY_LEDGER_MISMATCH")
+        atomic_json(self.output_dir / "ledger.json", ledger_payload)
+        atomic_json(manifest_path, {"ledger_hash": ledger_hash, "expected_cells": len(ledger), "model": self.model.model})
+        status_counts: dict[str, int] = {}
+        for i, cell in enumerate(ledger, 1):
+            try: ev = self.run_cell(cell)
+            except Exception as exc:
+                task = build_task(cell.seed, cell.family, cell.difficulty, cell.stage, cell.lineage); state = self._state_for(cell)
+                ev = self._invalid_evidence(cell, task, state, CellStatus.HARNESS_INVALID, repr(exc), 0, None); self.store.write(ev)
+            status_counts[ev.status] = status_counts.get(ev.status, 0) + 1
+            self.completed = i
+            atomic_json(self.output_dir / "progress.json", {"completed": i, "expected": len(ledger), "last_cell": cell.cell_id, "status_counts": status_counts})
+            if i == 1 or i % self.progress_every == 0 or i == len(ledger):
+                print(f"008 progress {i}/{len(ledger)} last={ev.status} valid={sum(status_counts.get(s.value,0) for s in VALID_SCORED)}", flush=True, file=sys.stderr)
