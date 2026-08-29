@@ -50,27 +50,27 @@ class UnboundTaskIR:
         }
 
 
-@dataclass(frozen=True)
-class LiveSurface:
-    world_id: str
-    representation: str
-    content: Any
-    image: LiveImage | None = None
+class LiveSurface(dict):
+    """JSON-native surface with deterministic image helpers."""
+
+    def __init__(self, world_id: str, representation: str, content: Any, image: LiveImage | None = None):
+        payload: dict[str, Any] = {"world_id": world_id, "representation": representation, "content": content}
+        if image is not None:
+            payload["image"] = image.to_dict()
+        super().__init__(payload)
+        self._image = image
 
     def to_dict(self) -> dict[str, Any]:
-        payload = {"world_id": self.world_id, "representation": self.representation, "content": self.content}
-        if self.image is not None:
-            payload["image"] = self.image.to_dict()
-        return payload
+        return dict(self)
 
     def image_bytes(self) -> bytes:
-        if self.image is None:
+        if self._image is None:
             return b""
-        return base64.b64decode(self.image.base64_data)
+        return base64.b64decode(self._image.base64_data)
 
     @property
     def sha256(self) -> str:
-        return self.image.sha256 if self.image is not None else hashlib.sha256(json.dumps(self.to_dict(), sort_keys=True).encode()).hexdigest()
+        return self._image.sha256 if self._image is not None else hashlib.sha256(json.dumps(self, sort_keys=True).encode()).hexdigest()
 
 
 def oracle_unbound_ir(world: World) -> UnboundTaskIR:
@@ -134,7 +134,6 @@ def _describe_payload(intent: str, payload: dict[str, Any]) -> str:
 
 
 def _structured_operation(operation: UnboundOperation, ordinal: int) -> dict[str, Any]:
-    # Deliberately domain-neutral: no solver or engine class labels.
     return {"item": ordinal, "facts": operation.payload, "requested_output": "compute the exact requested outcome from these facts"}
 
 
@@ -148,7 +147,6 @@ def _png_chunk(kind: bytes, data: bytes) -> bytes:
 
 
 def _render_text_png(text: str, width: int = 960) -> bytes:
-    # A deterministic monochrome raster. It is intentionally simple and dependency-free.
     encoded = text.encode("utf-8")
     bits: list[int] = []
     for byte in encoded:
@@ -181,7 +179,6 @@ def render_live_surface(world: World, representation: str) -> LiveSurface:
         content = {"request": "The notes below were shuffled. Reconstruct the intended item order from their numbered positions, ignore irrelevant wording, and return the exact outcomes.", "notes": [{"position": len(rows) - index, "text": row} for index, row in enumerate(reverse_rows)], "distractors": ["Presentation order is not evidence of execution order.", "Do not assume approximate answers are acceptable."]}
         return LiveSurface(world.world_id, representation, content)
     if representation == "R4_IMPLICIT":
-        # Values remain available, but requested operations are not named. The model must infer them from structure.
         content = {"request": "Infer what exact operations are necessary from these mixed records, then return one outcome per record group in group order.", "groups": [{"group": index + 1, "records": operation.payload} for index, operation in enumerate(operations)]}
         return LiveSurface(world.world_id, representation, content)
     if representation == "R5_PERCEPTUAL":
