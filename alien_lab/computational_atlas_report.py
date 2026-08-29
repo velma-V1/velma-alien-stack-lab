@@ -143,6 +143,21 @@ def _synergy_candidates(worlds: list[World]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _synergy_map(worlds: list[World]) -> dict[str, Any]:
+    return {
+        "evidence_kind": "CAPABILITY_COREQUIREMENT_CANDIDATES",
+        "measured_synergy": False,
+        "status": "PENDING_TYPED_DATAFLOW_EVIDENCE",
+        "candidate_pairs": _synergy_candidates(worlds),
+        "claim_boundary": (
+            "Phase A/B can show that several capability classes are jointly required for a world, "
+            "but independent operation sequences do not prove positive causal synergy. Measured synergy "
+            "requires held-out typed-dataflow tasks where one engine output is a necessary input to another "
+            "and the combined architecture beats every constituent arm."
+        ),
+    }
+
+
 def _missing_clusters(worlds: list[World]) -> dict[str, int]:
     counts = Counter(world.family for world in worlds if world.outside_basis)
     return dict(sorted(counts.items()))
@@ -153,7 +168,7 @@ def build_discovery_report(*, worlds: list[World], phase_maps: dict[str, Any]) -
         "computational_coverage": phase_maps.get("computational_coverage", {}),
         "minimum_basis": phase_maps.get("minimum_basis", {}),
         "unique_engine_value": phase_maps.get("unique_engine_value", phase_maps.get("leave_one_out", {})),
-        "synergy_matrix": _synergy_candidates(worlds),
+        "synergy_matrix": _synergy_map(worlds),
         "substitution_redundancy": phase_maps.get("leave_one_out", {}),
         "semantic_degradation": {"status": "PENDING_LOCAL_MODEL_EVIDENCE", "representations": ["R0", "R1", "R2", "R3", "R4", "R5"]},
         "semantic_error_taxonomy": {"status": "PENDING_LOCAL_MODEL_EVIDENCE"},
@@ -172,7 +187,7 @@ def build_discovery_report(*, worlds: list[World], phase_maps: dict[str, Any]) -
         "next_direction_pareto": [
             {"direction": "semantic_compiler", "why": "009 proved exact computation after formalization; representation generalization remains unmeasured"},
             {"direction": "missing_operator_discovery", "why": "outside-basis probes are preserved and clustered instead of scored as infrastructure failure"},
-            {"direction": "typed_composition", "why": "multi-capability worlds expose handoff and orchestration bottlenecks"},
+            {"direction": "typed_composition", "why": "multi-capability worlds identify co-requirements, but true causal synergy still requires typed-dataflow evidence"},
             {"direction": "production_adapter_selection", "why": "reference engines must be replaced by mature V31M4-compatible implementations before promotion"},
         ],
     }
