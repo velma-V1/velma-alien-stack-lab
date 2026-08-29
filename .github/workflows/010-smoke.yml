@@ -32,9 +32,38 @@ jobs:
             -v
       - name: Run credential-free 010 smoke atlas
         run: |
-          rm -rf /tmp/010-computational-basis-atlas
+          rm -rf /tmp/010-computational-basis-atlas-smoke
           python -m alien_lab.computational_atlas \
             --config experiments/010-computational-basis-atlas/config.json \
-            --output-dir /tmp/010-computational-basis-atlas \
+            --output-dir /tmp/010-computational-basis-atlas-smoke \
             --profile smoke
-          cat /tmp/010-computational-basis-atlas/summary.json
+          cat /tmp/010-computational-basis-atlas-smoke/summary.json
+      - name: Run full 18,112-cell deterministic atlas
+        run: |
+          rm -rf /tmp/010-computational-basis-atlas-full
+          python -m alien_lab.computational_atlas \
+            --config experiments/010-computational-basis-atlas/config.json \
+            --output-dir /tmp/010-computational-basis-atlas-full \
+            --profile atlas
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          summary = json.loads(Path('/tmp/010-computational-basis-atlas-full/summary.json').read_text())
+          compact = {key: summary[key] for key in (
+              'conclusion', 'expected_cells', 'terminal_cells', 'invalid_cells',
+              'verified_successes', 'valid_unresolved', 'model_calls',
+              'ledger_hash', 'replay_fingerprint'
+          )}
+          print(json.dumps(compact, indent=2, sort_keys=True))
+          PY
+      - name: Upload 010 report evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-010-report-evidence
+          path: |
+            /tmp/010-computational-basis-atlas-smoke/summary.json
+            /tmp/010-computational-basis-atlas-full/summary.json
+            /tmp/010-computational-basis-atlas-full/discovery-report.json
+            /tmp/010-computational-basis-atlas-full/production-fitness.json
+          if-no-files-found: error
+          retention-days: 30
