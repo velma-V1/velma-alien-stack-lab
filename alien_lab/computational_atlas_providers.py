@@ -4,7 +4,6 @@ import json
 import time
 import urllib.error
 import urllib.request
-from dataclasses import asdict
 from typing import Any, Callable, Protocol
 
 from .computational_atlas_live_types import ModelRequest, ModelResponse, RunIdentity
@@ -74,7 +73,7 @@ class _HTTPProviderBase:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
 
-    def _post(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> tuple[dict[str, Any] | None, str | None, float]:
+    def _post(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> tuple[dict[str, Any] | None, str | None, float, int]:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(self.endpoint + path, data=body, headers=headers, method="POST")
         start = time.perf_counter()
@@ -83,12 +82,12 @@ class _HTTPProviderBase:
             try:
                 raw = self._transport(request, self.timeout)
                 elapsed = (time.perf_counter() - start) * 1000.0
-                return json.loads(raw.decode("utf-8")), None, elapsed
+                return json.loads(raw.decode("utf-8")), None, elapsed, attempt
             except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 if attempt >= 2:
                     break
-        return None, last_error, (time.perf_counter() - start) * 1000.0
+        return None, last_error, (time.perf_counter() - start) * 1000.0, 2
 
 
 class OllamaProvider(_HTTPProviderBase):
@@ -97,8 +96,7 @@ class OllamaProvider(_HTTPProviderBase):
         return "/api/chat"
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        content = request.prompt
-        message: dict[str, Any] = {"role": "user", "content": content}
+        message: dict[str, Any] = {"role": "user", "content": request.prompt}
         if request.images:
             message["images"] = [image.base64_data for image in request.images]
         payload: dict[str, Any] = {
@@ -111,9 +109,9 @@ class OllamaProvider(_HTTPProviderBase):
             payload["format"] = request.json_schema
         if request.tools:
             payload["tools"] = list(request.tools)
-        data, transport_error, elapsed = self._post(self.default_path(), payload, {"Content-Type": "application/json"})
+        data, transport_error, elapsed, retries = self._post(self.default_path(), payload, {"Content-Type": "application/json"})
         if data is None:
-            return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error)
+            return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error, transport_retries=retries)
         message_data = data.get("message") or {}
         text = str(message_data.get("content") or "")
         parsed = None
@@ -121,8 +119,8 @@ class OllamaProvider(_HTTPProviderBase):
             try:
                 parsed = _parse_json_text(text)
             except Exception as exc:
-                return ModelResponse(ok=False, text=text, model_calls=1, prompt_tokens=data.get("prompt_eval_count"), output_tokens=data.get("eval_count"), duration_ms=elapsed, stop_reason=data.get("done_reason"), error_kind="MALFORMED_OUTPUT", error=str(exc), raw=data)
-        return ModelResponse(ok=True, text=text, parsed_json=parsed, model_calls=1, prompt_tokens=data.get("prompt_eval_count"), output_tokens=data.get("eval_count"), duration_ms=elapsed, stop_reason=data.get("done_reason"), raw=data)
+                return ModelResponse(ok=False, text=text, model_calls=1, prompt_tokens=data.get("prompt_eval_count"), output_tokens=data.get("eval_count"), duration_ms=elapsed, stop_reason=data.get("done_reason"), error_kind="MALFORMED_OUTPUT", error=str(exc), transport_retries=retries, raw=data)
+        return ModelResponse(ok=True, text=text, parsed_json=parsed, model_calls=1, prompt_tokens=data.get("prompt_eval_count"), output_tokens=data.get("eval_count"), duration_ms=elapsed, stop_reason=data.get("done_reason"), transport_retries=retries, raw=data)
 
 
 class AnthropicMessagesProvider(_HTTPProviderBase):
@@ -149,23 +147,23 @@ class AnthropicMessagesProvider(_HTTPProviderBase):
             payload["system"] = request.system
         if request.tools:
             payload["tools"] = list(request.tools)
-        data, transport_error, elapsed = self._post(
+        data, transport_error, elapsed, retries = self._post(
             self.default_path(),
             payload,
             {"Content-Type": "application/json", "x-api-key": self.api_key, "anthropic-version": self.anthropic_version},
         )
         if data is None:
-            return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error)
+            return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error, transport_retries=retries)
         stop_reason = data.get("stop_reason")
         blocks = data.get("content") or []
         text = "\n".join(str(block.get("text", "")) for block in blocks if block.get("type") == "text").strip()
         usage = data.get("usage") or {}
         if stop_reason == "refusal":
-            return ModelResponse(ok=False, text=text, model_calls=1, prompt_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"), duration_ms=elapsed, stop_reason=stop_reason, error_kind="REFUSAL", error="provider refusal", raw=data)
+            return ModelResponse(ok=False, text=text, model_calls=1, prompt_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"), duration_ms=elapsed, stop_reason=stop_reason, error_kind="REFUSAL", error="provider refusal", transport_retries=retries, raw=data)
         parsed = None
         if request.json_schema is not None:
             try:
                 parsed = _parse_json_text(text)
             except Exception as exc:
-                return ModelResponse(ok=False, text=text, model_calls=1, prompt_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"), duration_ms=elapsed, stop_reason=stop_reason, error_kind="MALFORMED_OUTPUT", error=str(exc), raw=data)
-        return ModelResponse(ok=True, text=text, parsed_json=parsed, model_calls=1, prompt_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"), duration_ms=elapsed, stop_reason=stop_reason, raw=data)
+                return ModelResponse(ok=False, text=text, model_calls=1, prompt_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"), duration_ms=elapsed, stop_reason=stop_reason, error_kind="MALFORMED_OUTPUT", error=str(exc), transport_retries=retries, raw=data)
+        return ModelResponse(ok=True, text=text, parsed_json=parsed, model_calls=1, prompt_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"), duration_ms=elapsed, stop_reason=stop_reason, transport_retries=retries, raw=data)
