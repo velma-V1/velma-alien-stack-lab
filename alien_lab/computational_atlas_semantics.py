@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Any
 
 from .computational_atlas_engines import run_engine
 from .computational_atlas_live_types import ModelRequest, ModelResponse
-from .computational_atlas_surfaces import INTENT_BY_CAPABILITY, UnboundOperation, UnboundTaskIR, task_ir_json_schema
+from .computational_atlas_providers import parse_model_json
+from .computational_atlas_surfaces import INTENT_BY_CAPABILITY, LEGAL_INTENTS, UnboundOperation, UnboundTaskIR, task_ir_json_schema
 
 
 CAPABILITY_BY_INTENT = {intent: capability for capability, intent in INTENT_BY_CAPABILITY.items() if capability != "U"}
@@ -14,7 +14,8 @@ CAPABILITY_BY_INTENT = {intent: capability for capability, intent in INTENT_BY_C
 SEMANTIC_SYSTEM_PROMPT = (
     "Convert the supplied problem into the exact JSON TaskIR schema. "
     "Do not solve the task. Preserve every operation, value, relationship, and requested order. "
-    "Use semantic intent names only; never invent missing facts."
+    "The legal intent values are exactly: " + ", ".join(LEGAL_INTENTS) + ". "
+    "Choose only from those interface values; never invent missing facts."
 )
 
 DIRECT_SYSTEM_PROMPT = (
@@ -85,7 +86,14 @@ def execute_unbound(ir: UnboundTaskIR) -> tuple[bool, tuple[Any, ...], list[str]
     return True, tuple(values), errors
 
 
-def compile_with_provider(provider: Any, *, request_id: str, surface: dict[str, Any], constrained: bool, images: tuple[Any, ...] = ()) -> tuple[ModelResponse, UnboundTaskIR | None, list[str]]:
+def compile_with_provider(
+    provider: Any,
+    *,
+    request_id: str,
+    surface: dict[str, Any],
+    constrained: bool,
+    images: tuple[Any, ...] = (),
+) -> tuple[ModelResponse, UnboundTaskIR | None, list[str]]:
     prompt = SEMANTIC_SYSTEM_PROMPT + "\nINPUT:\n" + json.dumps(surface, sort_keys=True)
     response = provider.complete(ModelRequest(
         request_id=request_id,
@@ -96,12 +104,10 @@ def compile_with_provider(provider: Any, *, request_id: str, surface: dict[str, 
     ))
     if not response.ok:
         return response, None, [response.error_kind or "model_error"]
-    parsed = response.parsed_json
-    if parsed is None:
-        try:
-            parsed = json.loads(response.text)
-        except Exception:
-            return response, None, ["json_parse_error"]
+    try:
+        parsed = parse_model_json(response)
+    except Exception:
+        return response, None, ["json_parse_error"]
     try:
         ir = unbound_from_dict(parsed)
     except Exception as exc:
