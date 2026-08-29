@@ -1,0 +1,210 @@
+
+    def match(self, task: TaskSpec) -> CompiledSkill | None:
+        labels = {a.label for a in task.actions}
+        candidates = [s for s in self.skills.values() if s.family == task.family and set(s.learned_labels).issubset(labels)]
+        candidates.sort(key=lambda s: (len(s.semantics), s.skill_id))
+        return candidates[-1] if candidates else None
+
+    def resolve(self, task: TaskSpec, skill: CompiledSkill) -> tuple[list[str] | None, list[str], str | None]:
+        current = list(task.actions)
+        by_locator = {a.locator: a for a in current}
+        used = set()
+        out: list[str] = []
+        rungs: list[str] = []
+        for idx, sem in enumerate(skill.semantics):
+            old_locator = skill.learned_locators[idx] if idx < len(skill.learned_locators) else ""
+            if old_locator in by_locator and by_locator[old_locator].semantic_id == sem and old_locator not in used:
+                out.append(old_locator); used.add(old_locator); rungs.append("EXACT"); continue
+            label = skill.learned_labels[idx] if idx < len(skill.learned_labels) else ""
+            label_hits = [a for a in current if a.label == label and a.locator not in used]
+            if len(label_hits) == 1 and label_hits[0].semantic_id == sem:
+                out.append(label_hits[0].locator); used.add(label_hits[0].locator); rungs.append("LABEL"); continue
+            slot = skill.learned_slots[idx] if idx < len(skill.learned_slots) else -1
+            slot_hits = [a for a in current if a.slot == slot and a.locator not in used]
+            if len(slot_hits) == 1 and slot_hits[0].semantic_id == sem and task.drift_severity <= 1:
+                out.append(slot_hits[0].locator); used.add(slot_hits[0].locator); rungs.append("STRUCTURE"); continue
+            return None, rungs, f"UNRESOLVED:{sem}"
+        return out, rungs, None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: asdict(v) for k, v in self.skills.items()}
+
+    @classmethod
+    def from_dict(cls, doc: dict[str, Any]) -> "SkillRegistry":
+        fields = ("semantics", "learned_locators", "learned_labels", "learned_slots")
+        skills = {}
+        for k, v in doc.items():
+            vv = dict(v)
+            for name in fields:
+                vv[name] = tuple(vv[name])
+            skills[k] = CompiledSkill(**vv)
+        return cls(skills)
+
+
+@dataclass
+class ArchitectureState:
+    memory: AlienMemory = field(default_factory=AlienMemory)
+    skills: SkillRegistry = field(default_factory=SkillRegistry)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"memory": self.memory.to_dict(), "skills": self.skills.to_dict()}
+
+    @classmethod
+    def from_dict(cls, doc: dict[str, Any]) -> "ArchitectureState":
+        return cls(AlienMemory.from_dict(doc.get("memory", {})), SkillRegistry.from_dict(doc.get("skills", {})))
+
+    def fingerprint(self) -> str:
+        return stable_hash(self.to_dict())
+
+
+def _apply(regs: list[int], action: SurfaceAction) -> None:
+    t = action.target % len(regs)
+    if action.op == "ADD": regs[t] = (regs[t] + action.arg) % MODULUS
+    elif action.op == "MUL": regs[t] = (regs[t] * max(1, action.arg)) % MODULUS
+    elif action.op == "XORADD": regs[t] = (regs[t] + (regs[(t + 1) % len(regs)] ^ action.arg)) % MODULUS
+    else: raise ValueError(action.op)
+
+
+def _execute_semantics(initial: tuple[int, ...], actions: Iterable[SurfaceAction], semantics: Iterable[str]) -> tuple[int, ...]:
+    regs = list(initial); by_sem = {a.semantic_id: a for a in actions}
+    for sem in semantics:
+        _apply(regs, by_sem[sem])
+    return tuple(regs)
+
+
+def build_task(seed: int, family: str, difficulty: int, stage: str, lineage: str) -> TaskSpec:
+    if family not in FAMILIES:
+        raise ValueError(family)
+    # Lifecycle stages share one underlying task. Only stages that are explicitly
+    # meant to vary the task get a deterministic variation salt.
+    variation = stage if stage in {"PARAMETER_VARIATION", "TRANSFER", "COMPOSITION"} else "BASE"
+    rng = random.Random(stable_hash([seed, family, difficulty, lineage, variation]))
+    reg_count = 3 + min(3, difficulty // 6)
+    initial = tuple(rng.randrange(MODULUS) for _ in range(reg_count))
+    public_flag = rng.randrange(2)
+    depth = 2 + min(14, difficulty // 2)
+    if family == "loop_worklist":
+        depth += min(6, difficulty // 3)
+    if family == "composition" or stage == "COMPOSITION":
+        depth += min(5, difficulty // 4)
+
+    semantics = [f"A{i:02d}" for i in range(depth)]
+    rng.shuffle(semantics)
+    if family == "conditional_branch" and public_flag == 0 and len(semantics) >= 4:
+        semantics = semantics[:-1]
+    required = tuple(semantics)
+
+    drift = 1 + (difficulty // 10) if stage == "DRIFT" else 0
+    slot_order = list(range(len(required)))
+    rng.shuffle(slot_order)
+    actions: list[SurfaceAction] = []
+    prev = "START"
+    for order_idx, sem in enumerate(required):
+        slot = slot_order[order_idx]
+        op = ("ADD", "MUL", "XORADD")[order_idx % 3]
+        locator = f"node-{slot:02d}" + (f"-v{drift}" if drift else "")
+        condition = "any"
+        if family == "conditional_branch" and order_idx == len(required) - 1:
+            condition = f"flag={public_flag}"
+        label = f"action={sem} requires={prev} condition={condition}"
+        actions.append(SurfaceAction(sem, locator, label, slot, op, order_idx % reg_count, 2 + rng.randrange(13)))
+        prev = sem
+
+    distractors = 2 + min(10, difficulty // 2)
+    used_slots = set(slot_order)
+    next_slot = 0
+    for j in range(distractors):
+        while next_slot in used_slots:
+            next_slot += 1
+        forbidden = family == "policy_guard" and j == 0
+        locator = f"noise-{next_slot:02d}" + (f"-v{drift}" if drift else "")
+        label = f"action=D{j:02d} requires=NEVER condition=flag=2"
+        actions.append(SurfaceAction(f"D{j:02d}", locator, label, next_slot, "ADD", j % reg_count, 101 + j, forbidden))
+        used_slots.add(next_slot); next_slot += 1
+
+    rng.shuffle(actions)
+    oracle_final = _execute_semantics(initial, actions, required)
+    silent_fault = stage == "SILENT_EFFECT_FAULT" or family == "silent_effect_fault"
+    task_id = stable_hash([seed, family, difficulty, stage, lineage, variation])[:20]
+    oracle_hash = stable_hash({"required": required, "final": oracle_final})
+    return TaskSpec(task_id, family, difficulty, stage, lineage, seed, initial, tuple(actions), required,
+                    public_flag, silent_fault, drift, oracle_final, oracle_hash)
+
+def render_planner_prompt(task: TaskSpec, memory: list[MemoryRecord] | None = None, repair: str | None = None) -> str:
+    lines = [
+        "EXPERIMENT 008 ARCHITECTURE DISCOVERY", "Plan the task using ONLY current surface locators.",
+        "Return strict JSON only: {\"plan\":[\"locator\",...]}", f"TASK_ID={task.task_id}",
+        f"FAMILY={task.family}", f"STAGE={task.stage}", f"PUBLIC_FLAG={task.public_flag}",
+        "CURRENT SURFACE:",
+    ]
+    for a in sorted(task.actions, key=lambda x: x.slot):
+        policy = " FORBIDDEN" if a.forbidden else ""
+        lines.append(f"locator={a.locator} label={a.label}{policy}")
+    if memory:
+        lines.append("VERIFIED EXTERNAL COGNITION (semantic procedures; map them to CURRENT locators):")
+        for m in memory:
+            lines.append(f"{m.record_id}: {' -> '.join(m.semantics)}")
+    if repair: lines.append("PREVIOUS ATTEMPT ERROR: " + repair)
+    return "\n".join(lines)
+
+
+def render_auditor_prompt(task: TaskSpec, plan: list[str]) -> str:
+    return "\n".join([
+        "EXPERIMENT 008 INDEPENDENT AUDITOR", "Review candidate against the CURRENT SURFACE and policy.",
+        "Return strict JSON only: {\"decision\":\"APPROVE\"} OR {\"decision\":\"REJECT\",\"plan\":[...]}",
+        f"TASK_ID={task.task_id}", "SURFACE=" + json.dumps(task.public_dict()["surface"], sort_keys=True),
+        "CANDIDATE=" + json.dumps(plan),
+    ])
+
+
+def parse_plan(text: str | None) -> list[str] | None:
+    if not text: return None
+    try: doc = json.loads(text)
+    except json.JSONDecodeError: return None
+    plan = doc.get("plan") if isinstance(doc, dict) else None
+    if not isinstance(plan, list) or not plan or not all(isinstance(x, str) for x in plan): return None
+    return plan
+
+
+def parse_audit(text: str | None) -> tuple[str | None, list[str] | None]:
+    if not text: return None, None
+    try: doc = json.loads(text)
+    except json.JSONDecodeError: return None, None
+    if not isinstance(doc, dict): return None, None
+    d = doc.get("decision")
+    if d == "APPROVE": return d, None
+    if d == "REJECT" and isinstance(doc.get("plan"), list) and all(isinstance(x, str) for x in doc["plan"]):
+        return d, doc["plan"]
+    return None, None
+
+
+@dataclass
+class ModelCall:
+    status: str
+    response: str | None
+    prompt_tokens: int = 0
+    eval_tokens: int = 0
+    wall_ms: float = 0.0
+    done_reason: str = ""
+    hit_ceiling: bool = False
+    error: str | None = None
+
+
+class ModelGateway:
+    def __init__(self, client: Any, spec: ModelSpec, retry_count: int = 3, timeout_seconds: float = 600.0):
+        self.client, self.spec, self.retry_count, self.timeout_seconds = client, spec, retry_count, timeout_seconds
+        self.calls: list[dict[str, Any]] = []
+        self.metadata: dict[str, Any] | None = None
+
+    def preflight_metadata(self) -> dict[str, Any]:
+        self.metadata = self.client.model_metadata(self.spec.model)
+        return self.metadata
+
+    def _think_arg(self) -> bool | None:
+        if self.metadata is None: self.preflight_metadata()
+        caps = set((self.metadata or {}).get("capabilities", []))
+        return False if "thinking" in caps else None
+
+    def generate(self, prompt: str, seed: int) -> ModelCall:
+        if math.ceil(len(prompt.encode()) / 3) > self.spec.context_limit:
+            return ModelCall(CellStatus.CONTEXT_CAP_REACHED.value, None)
