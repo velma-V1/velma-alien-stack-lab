@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import socket
 import statistics
 import time
@@ -16,12 +17,15 @@ from .final_memory_frontier import (
     ARM_NONE,
     ARM_RETRIEVED,
     ARMS,
+    TITAN_ARMS,
     VARIANTS_PER_LEVEL,
     Final007Runner,
     MemoryStore,
     ModelSpec,
     SuiteConfig,
+    _jsonl,
     build_level,
+    context_guard,
     generate_bootstrap,
     parse_answers,
     promote_verified,
@@ -143,6 +147,14 @@ class Repaired007Runner(Final007Runner):
         caps = set(self._metadata(client, spec).get("capabilities", []))
         return False if "thinking" in caps else None
 
+    @staticmethod
+    def _terminal_failure_status(failures: list[dict[str, Any]]) -> str:
+        if failures and all(row.get("status") == "OUTPUT_CAP_REACHED" for row in failures):
+            return "OUTPUT_CAP_REACHED"
+        if failures and all(row.get("status") == "TIME_BUDGET_ABORT" for row in failures):
+            return "TIME_BUDGET_ABORT"
+        return "INFRASTRUCTURE_UNSCORABLE"
+
     def _safe_generate(self, client: Any, spec: ModelSpec, prompt: str, seed: int) -> tuple[Any | None, list[dict[str, Any]]]:
         failures: list[dict[str, Any]] = []
         think = self._thinking_arg(client, spec)
@@ -181,6 +193,95 @@ class Repaired007Runner(Final007Runner):
                 time.sleep(0.01)
         return None, failures
 
+    @staticmethod
+    def _strict_recovered_choices(text: str | None, expected_count: int) -> list[str] | None:
+        if not text:
+            return None
+        if expected_count == 1:
+            match = re.fullmatch(r"\s*([ABCD])\s*", text, flags=re.I)
+            return [match.group(1).upper()] if match else None
+        pieces = [rf"{i}\s*:\s*([ABCD])" for i in range(1, expected_count + 1)]
+        match = re.fullmatch(r"\s*" + r"\s+".join(pieces) + r"\s*", text, flags=re.I)
+        return [group.upper() for group in match.groups()] if match else None
+
+    def _format_only_recovery(
+        self,
+        client: Any,
+        spec: ModelSpec,
+        raw_response: str,
+        expected_count: int,
+        seed: int,
+    ) -> tuple[list[str] | None, dict[str, Any]]:
+        contract = "<LETTER>" if expected_count == 1 else " ".join(
+            f"{i}:<LETTER>" for i in range(1, expected_count + 1)
+        )
+        prompt = "\n".join([
+            "FORMAT-ONLY RECOVERY",
+            "You are a transcription formatter, not a problem solver.",
+            "You are intentionally NOT given the task, rules, choices, or correct answers.",
+            "Do not solve, reason, infer, add, remove, reorder, or change any answer choice.",
+            f"The source must unambiguously encode exactly {expected_count} A/B/C/D choice(s).",
+            f"If it does, return exactly: {contract}",
+            "If it does not, return exactly: INVALID",
+            "SOURCE RESPONSE:",
+            raw_response,
+        ])
+        think = self._thinking_arg(client, spec)
+        meta: dict[str, Any] = {
+            "used": True,
+            "source_hash": stable_hash(raw_response),
+            "status": "FORMAT_RECOVERY_FAILED",
+            "response": None,
+            "think": think,
+        }
+        try:
+            result = client.generate(
+                model=spec.model,
+                prompt=prompt,
+                num_ctx=spec.context_limit,
+                num_predict=min(spec.output_budget, 128),
+                temperature=0.0,
+                seed=seed,
+                timeout_seconds=self.config.call_timeout_seconds,
+                think=think,
+            )
+        except Exception as exc:
+            meta["error"] = repr(exc)
+            return None, meta
+        meta.update({
+            "response": getattr(result, "response", None),
+            "model_status": getattr(result, "status", ""),
+            "done_reason": getattr(result, "done_reason", ""),
+            "hit_ceiling": bool(getattr(result, "hit_ceiling", False)),
+            "prompt_tokens": int(getattr(result, "prompt_tokens", 0)),
+            "eval_tokens": int(getattr(result, "eval_tokens", 0)),
+            "wall_ms": float(getattr(result, "wall_ms", 0.0)),
+        })
+        if getattr(result, "status", "") != "OK" or getattr(result, "hit_ceiling", False):
+            return None, meta
+        recovered = self._strict_recovered_choices(getattr(result, "response", None), expected_count)
+        if recovered is None:
+            meta["status"] = "FORMAT_RECOVERY_INVALID"
+            return None, meta
+        meta["status"] = "OK"
+        return recovered, meta
+
+    def _parse_or_recover_answers(
+        self,
+        client: Any,
+        spec: ModelSpec,
+        raw_response: str | None,
+        task_ids: list[str],
+        seed: int,
+    ) -> tuple[dict[str, str | None], dict[str, Any]]:
+        parsed = parse_answers(raw_response, task_ids)
+        if all(parsed[task_id] is not None for task_id in task_ids):
+            return parsed, {"used": False, "status": "NOT_NEEDED"}
+        recovered, meta = self._format_only_recovery(client, spec, raw_response or "", len(task_ids), seed)
+        if recovered is None:
+            return parsed, meta
+        return {task_id: recovered[i] for i, task_id in enumerate(task_ids)}, meta
+
     def _preflight_model(self, spec: ModelSpec) -> dict[str, Any]:
         client = self.client_factory(self.config.ollama_url)
         try:
@@ -208,12 +309,14 @@ class Repaired007Runner(Final007Runner):
             result, failures = self._safe_generate(client, spec, prompt, self.config.seed ^ 0x700700)
             if result is None:
                 arms[arm] = {
-                    "status": failures[-1]["status"] if failures else "INFRASTRUCTURE_UNSCORABLE",
+                    "status": self._terminal_failure_status(failures),
                     "retry_failures": failures,
                     "memory_supplied_count": len(supplied),
                 }
                 continue
-            parsed = parse_answers(result.response, ids)
+            parsed, recovery = self._parse_or_recover_answers(
+                client, spec, result.response, ids, self.config.seed ^ 0x700701
+            )
             format_ok = all(parsed[task_id] is not None for task_id in ids)
             arms[arm] = {
                 "status": "OK" if format_ok else "FORMAT_UNSCORABLE",
@@ -223,6 +326,10 @@ class Repaired007Runner(Final007Runner):
                 "done_reason": getattr(result, "done_reason", ""),
                 "response": result.response,
                 "retry_failures": failures,
+                "format_recovery_used": bool(recovery.get("used")),
+                "format_recovery_status": recovery.get("status"),
+                "format_recovery_response": recovery.get("response"),
+                "format_recovery_source_hash": recovery.get("source_hash"),
             }
         passed = all(arms[arm]["status"] == "OK" for arm in ARMS)
         return {
@@ -233,6 +340,149 @@ class Repaired007Runner(Final007Runner):
             "thinking_arg": self._thinking_arg(client, spec),
             "arms": arms,
         }
+
+    def _run_arm(self, client: Any, spec: ModelSpec, model_dir: Path, level: int, variant: int,
+                 tasks: tuple[Any, ...], sealed: dict[str, str], store: MemoryStore, arm: str) -> dict[str, Any]:
+        prompt, supplied, raw_steps, compiled_steps = render_packet(tasks, store, arm)
+        fits, pbytes, est = context_guard(prompt, spec.context_limit)
+        base = {
+            "level": level, "variant": variant, "arm": arm, "prompt_hash": stable_hash(prompt),
+            "prompt_bytes": pbytes, "estimated_prompt_tokens": est, "memory_supplied": list(supplied),
+            "memory_supplied_count": len(supplied), "memory_store_count": len(store.macros),
+            "memory_fingerprint": store.fingerprint(), "raw_program_steps": raw_steps,
+            "compiled_program_steps": compiled_steps, "steps_saved": raw_steps - compiled_steps,
+        }
+        if not fits:
+            row = {**base, "status": "CONTEXT_CAP_REACHED", "accuracy": None, "task_results": []}
+            _jsonl(model_dir / "runs.jsonl", row)
+            return row
+        result, retry_failures = self._safe_generate(
+            client, spec, prompt, self.config.seed + level * 1000 + variant * 10
+        )
+        if result is None:
+            row = {
+                **base,
+                "status": self._terminal_failure_status(retry_failures),
+                "accuracy": None,
+                "retry_failures": retry_failures,
+                "task_results": [],
+            }
+            _jsonl(model_dir / "runs.jsonl", row)
+            return row
+        ids = [task.task_id for task in tasks]
+        pred, recovery = self._parse_or_recover_answers(
+            client,
+            spec,
+            result.response,
+            ids,
+            self.config.seed + level * 1000 + variant * 10 + 1,
+        )
+        complete = all(pred[task_id] is not None for task_id in ids)
+        recovery_fields = {
+            "format_recovery_used": bool(recovery.get("used")),
+            "format_recovery_status": recovery.get("status"),
+            "format_recovery_response": recovery.get("response"),
+            "format_recovery_source_hash": recovery.get("source_hash"),
+        }
+        if not complete:
+            row = {
+                **base,
+                "status": "FORMAT_UNSCORABLE",
+                "accuracy": None,
+                "response": result.response,
+                "retry_failures": retry_failures,
+                "task_results": [],
+                **recovery_fields,
+            }
+            _jsonl(model_dir / "runs.jsonl", row)
+            return row
+        task_results = []
+        for task in tasks:
+            success = pred[task.task_id] == sealed[task.task_id]
+            tr = {
+                "task_id": task.task_id,
+                "prediction": pred[task.task_id],
+                "expected": sealed[task.task_id],
+                "verified_success": success,
+                "start": task.start,
+                "rule_ids": list(task.rule_ids),
+            }
+            task_results.append(tr)
+            _jsonl(model_dir / "observations.jsonl", {**base, **tr})
+        accuracy = sum(row["verified_success"] for row in task_results) / len(task_results)
+        row = {
+            **base,
+            "status": "OK",
+            "accuracy": accuracy,
+            "response": result.response,
+            "prompt_tokens": getattr(result, "prompt_tokens", 0),
+            "eval_tokens": getattr(result, "eval_tokens", 0),
+            "wall_ms": getattr(result, "wall_ms", 0.0),
+            "retry_failures": retry_failures,
+            "task_results": task_results,
+            **recovery_fields,
+        }
+        _jsonl(model_dir / "runs.jsonl", row)
+        return row
+
+    def _run_titan(self, client: Any, spec: ModelSpec, model_dir: Path, store: MemoryStore) -> dict[str, Any]:
+        answer, oracle = self._build_titan(self.config.seed, store)
+        out = {
+            "oracle_hash": stable_hash(oracle),
+            "program_steps": len(oracle["ops"]),
+            "branch_points": 4,
+            "cross_register_joins": 8,
+            "nested_joins": 3,
+            "raw_rule_applications": oracle["raw_rule_applications"],
+            "macro_slots": oracle["macro_slots"],
+            "attempts": {},
+        }
+        for arm in TITAN_ARMS:
+            prompt, supplied, rendered_steps = self._titan_prompt(oracle, store, arm)
+            fits, pbytes, est = context_guard(prompt, spec.context_limit)
+            if not fits:
+                rec = {
+                    "status": "CONTEXT_CAP_REACHED", "correct": None,
+                    "memory_count": len(supplied), "prompt_bytes": pbytes,
+                    "estimated_prompt_tokens": est, "rendered_program_steps": rendered_steps,
+                }
+            else:
+                result, failures = self._safe_generate(client, spec, prompt, self.config.seed + 777777)
+                if result is None:
+                    rec = {
+                        "status": self._terminal_failure_status(failures),
+                        "correct": None,
+                        "memory_count": len(supplied),
+                        "retry_failures": failures,
+                        "rendered_program_steps": rendered_steps,
+                    }
+                else:
+                    match = re.fullmatch(r"\s*([ABCD])\s*", result.response or "", flags=re.I)
+                    recovery = {"used": False, "status": "NOT_NEEDED"}
+                    prediction = match.group(1).upper() if match else None
+                    if prediction is None:
+                        recovered, recovery = self._format_only_recovery(
+                            client, spec, result.response or "", 1, self.config.seed + 777778
+                        )
+                        prediction = recovered[0] if recovered else None
+                    rec = {
+                        "status": "OK" if prediction else "FORMAT_UNSCORABLE",
+                        "correct": bool(prediction == answer) if prediction else None,
+                        "prediction": prediction,
+                        "expected": answer,
+                        "memory_count": len(supplied),
+                        "prompt_tokens": getattr(result, "prompt_tokens", 0),
+                        "eval_tokens": getattr(result, "eval_tokens", 0),
+                        "wall_ms": getattr(result, "wall_ms", 0.0),
+                        "rendered_program_steps": rendered_steps,
+                        "format_recovery_used": bool(recovery.get("used")),
+                        "format_recovery_status": recovery.get("status"),
+                        "format_recovery_response": recovery.get("response"),
+                        "format_recovery_source_hash": recovery.get("source_hash"),
+                    }
+            out["attempts"][arm] = rec
+            _jsonl(model_dir / "titan.jsonl", {"arm": arm, **rec, "oracle_hash": out["oracle_hash"]})
+        return out
 
     def _write_json_atomic(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
