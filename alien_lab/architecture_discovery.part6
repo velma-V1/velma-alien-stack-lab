@@ -1,0 +1,208 @@
+    profile = {
+        "seeds": [11],
+        "families": ["linear_dependency", "drift_resolution", "silent_effect_fault"],
+        "factorial_difficulties": [2],
+        "placement_difficulty": 2,
+        "topologies": [asdict(FACTORIAL_ARMS[-1])],
+        "lifecycle": ["NOVEL", "REPEAT", "DRIFT", "SILENT_EFFECT_FAULT"],
+        "lifecycle_difficulty": 2,
+        "frontier_topologies": 1,
+        "frontier_start": 2,
+        "frontier_max": 4,
+        "frontier_step": 2,
+    }
+    model = ModelSpec("audit-model", "audit-model", 100000, 192)
+    ledger = build_ledger(model.model, profile)
+    task_map = {
+        build_task(c.seed, c.family, c.difficulty, c.stage, c.lineage).task_id:
+        build_task(c.seed, c.family, c.difficulty, c.stage, c.lineage)
+        for c in ledger
+    }
+    client = PerfectAuditClient(model_map=task_map)
+    runner = ArchitectureRunner(model, lambda _: client, "", output_dir,
+                                retry_count=1, progress_every=100000)
+    summary = runner.run(ledger)
+    evidence = runner.store.all()
+
+    oa_repeat = [e for e in evidence if e.phase == "FACTORIAL" and
+                 e.architecture["name"] == "OPENADAPT" and
+                 e.task_public.get("stage") == "REPEAT" and e.verified_success]
+    alien_repeat = [e for e in evidence if e.phase == "FACTORIAL" and
+                    e.architecture["name"] == "ALIEN" and
+                    e.task_public.get("stage") == "REPEAT" and e.verified_success]
+    velma_novel = [e for e in evidence if e.phase == "FACTORIAL" and
+                   e.architecture["name"] == "VELMA" and
+                   e.task_public.get("stage") == "NOVEL"]
+
+    property_ok = True
+    for seed in range(20, 45):
+        for family in FAMILIES:
+            for diff in (2, 10, 20):
+                n1 = build_task(seed, family, diff, "NOVEL", "property")
+                n2 = build_task(seed, family, diff, "NOVEL", "property")
+                rep = build_task(seed, family, diff, "REPEAT", "property")
+                drift = build_task(seed, family, diff, "DRIFT", "property")
+                if n1 != n2 or n1.required_semantics != rep.required_semantics or n1.initial != rep.initial:
+                    property_ok = False
+                if n1.required_semantics != drift.required_semantics:
+                    property_ok = False
+                if set(n1.public_dict()) & {"oracle_final", "required_semantics"}:
+                    property_ok = False
+
+    checks = {
+        "ledger_nonempty": len(ledger) > 100,
+        "ledger_ids_unique": len({c.cell_id for c in ledger}) == len(ledger),
+        "all_terminal": summary["terminal_cells"] == summary["expected_cells"],
+        "no_missing": not summary["missing_cells"],
+        "no_invalid": summary["invalid_or_unscorable_cells"] == 0,
+        "no_orphans": not summary["orphan_evidence_cells"],
+        "valid_zero_preserved": summary["valid_zero_cells"] > 0,
+        "factorial_all_8": len(summary["factorial"]) == 8,
+        "factorial_is_paired": summary["factorial_paired_blocks"] > 0,
+        "effects_present": "A_x_V_x_O" in summary["effects"],
+        "placement_blocks_paired": all(v["paired_blocks"] > 0 for v in summary["placement"].values()),
+        "openadapt_repeat_can_be_zero_model": bool(oa_repeat) and all(e.model_calls == 0 and e.skill_id for e in oa_repeat),
+        "alien_repeat_retrieves_memory": bool(alien_repeat) and all(e.retrieved_memory_ids for e in alien_repeat),
+        "velma_invokes_independent_auditor": bool(velma_novel) and all(e.model_calls >= 2 for e in velma_novel),
+        "openadapt_effect_verifier_eliminates_silent_wrong": all(
+            v["silent_wrong_effects"] == 0 for k, v in summary["factorial"].items() if "OPENADAPT" in k
+        ),
+        "model_only_exposes_false_success_control": summary["factorial"]["MODEL_ONLY"]["silent_wrong_effects"] > 0,
+        "generator_property_audit": property_ok,
+        "experiment_valid_gate": summary["experiment_complete_valid"] is True,
+    }
+    return {"passed": all(checks.values()), "checks": checks, "summary": summary}
+
+def live_preflight(models: list[ModelSpec], client_factory: Callable[[str], Any], ollama_url: str, output_dir: Path) -> dict[str, Any]:
+    rows = {}
+    easy = build_task(8008, "linear_dependency", 2, "NOVEL", "preflight")
+    for spec in models:
+        if not spec.enabled: continue
+        client = client_factory(ollama_url); gw = ModelGateway(client, spec, retry_count=1, timeout_seconds=120)
+        row: dict[str, Any] = {"model": asdict(spec)}
+        try: row["metadata"] = gw.preflight_metadata()
+        except Exception as exc:
+            row.update({"passed":False,"status":CellStatus.MODEL_UNAVAILABLE.value,"error":repr(exc)}); rows[spec.label]=row; continue
+        planner = gw.generate(render_planner_prompt(easy), 8008)
+        if planner.status != "OK":
+            row.update({"passed":False,"status":planner.status,"error":planner.error}); rows[spec.label]=row; continue
+        plan = parse_plan(planner.response)
+        if plan is None:
+            row.update({"passed":False,"status":CellStatus.FORMAT_UNSCORABLE.value,"planner_response":planner.response}); rows[spec.label]=row; continue
+        planner_outcome = execute_plan(easy, plan)
+        if not planner_outcome.verified_success:
+            row.update({"passed":False,"status":"LIVE_CAPABILITY_PREFLIGHT_FAILED","planner_response":planner.response,"planner_error":planner_outcome.error}); rows[spec.label]=row; continue
+        auditor = gw.generate(render_auditor_prompt(easy, plan), 8009)
+        decision,_ = parse_audit(auditor.response) if auditor.status == "OK" else (None,None)
+        if decision is None:
+            row.update({"passed":False,"status":auditor.status if auditor.status!="OK" else CellStatus.FORMAT_UNSCORABLE.value,"auditor_response":auditor.response}); rows[spec.label]=row; continue
+        # Internal no-model-call checks for Alien and OpenAdapt principles.
+        st = ArchitectureState(); by_sem = {a.semantic_id:a for a in easy.actions}; locs = tuple(by_sem[s].locator for s in easy.required_semantics)
+        st.memory.promote(easy, easy.required_semantics, "preflight", True); before_calls=len(gw.calls)
+        skill=st.skills.compile_verified(easy,easy.required_semantics,locs,"preflight",True); resolved,rungs,err=st.skills.resolve(easy,skill) if skill else (None,[],"no skill")
+        zero_model_replay = resolved is not None and len(gw.calls)==before_calls
+        row.update({"passed":bool(zero_model_replay),"status":"OK" if zero_model_replay else CellStatus.HARNESS_INVALID.value,
+                    "planner_format_ok":True,"auditor_format_ok":True,"thinking_arg":gw._think_arg(),"zero_model_skill_replay":zero_model_replay,
+                    "skill_rungs":rungs,"model_calls":len(gw.calls),"planner_response":planner.response,"auditor_response":auditor.response})
+        rows[spec.label]=row
+    report={"passed":bool(rows) and all(r.get("passed") for r in rows.values()),"models":rows}; atomic_json(output_dir/"preflight.json",report); return report
+
+
+def openadapt_product_gate(output_dir: Path, timeout_seconds: float = 900.0,
+                           which: Callable[[str], str | None] = shutil.which,
+                           run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+    """Validate the installed OpenAdapt Flow product against its own shipped tutorial.
+
+    This lane is deliberately separate from the controlled architecture abstraction.
+    It proves that the actual installed product can complete a healthy zero-model-call
+    replay and can catch an optimistic-screen/backend-refutation fault.
+    """
+    exe = which("openadapt-flow")
+    if not exe:
+        report = {"passed": False, "status": "OPENADAPT_PRODUCT_UNAVAILABLE", "executable": None}
+        atomic_json(output_dir / "openadapt-product-gate.json", report)
+        return report
+    rows = []
+    commands = ([exe, "tutorial"], [exe, "tutorial", "--break-it"])
+    for cmd in commands:
+        try:
+            cp = run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+            rows.append({"command": cmd, "returncode": int(cp.returncode),
+                         "stdout": cp.stdout, "stderr": cp.stderr})
+        except Exception as exc:
+            rows.append({"command": cmd, "returncode": None, "stdout": "", "stderr": repr(exc)})
+    healthy_text = (rows[0]["stdout"] + "\n" + rows[0]["stderr"]).lower()
+    broken_text = (rows[1]["stdout"] + "\n" + rows[1]["stderr"]).lower()
+    healthy_verified = "verified" in healthy_text
+    zero_model = bool(re.search(r"model\s*calls\s*[:=]?\s*0\b", healthy_text)) or "0 model calls" in healthy_text
+    broken_caught = "reconciliation_required" in broken_text or "refuted" in broken_text
+    passed = healthy_verified and zero_model and broken_caught
+    report = {
+        "passed": passed,
+        "status": "OK" if passed else "OPENADAPT_PRODUCT_GATE_FAILED",
+        "executable": exe,
+        "healthy_verified": healthy_verified,
+        "healthy_zero_model_calls": zero_model,
+        "broken_false_success_caught": broken_caught,
+        "runs": rows,
+    }
+    atomic_json(output_dir / "openadapt-product-gate.json", report)
+    return report
+
+
+def load_models(path: Path) -> tuple[str, list[ModelSpec]]:
+    doc=json.loads(path.read_text(encoding="utf-8")); url=doc.get("ollama_url","http://localhost:11434")
+    models=[ModelSpec(m["model"],m.get("label",m["model"]),int(m.get("context_limit",25600)),int(m.get("output_budget",192)),float(m.get("temperature",0.0)),bool(m.get("enabled",True))) for m in doc.get("models",[])]
+    return url,models
+
+
+def select_model_from_007(summary_path: Path) -> ModelSpec:
+    doc=json.loads(summary_path.read_text(encoding="utf-8")); candidates=[]
+    for i,row in enumerate(doc.get("models",[])):
+        if not row.get("experiment_valid", row.get("completed",False)): continue
+        if not row.get("paired_packet_count"): continue
+        gain=row.get("paired_retrieved_minus_none_mean")
+        if gain is None: continue
+        ret=(row.get("analysis") or {}).get("RETRIEVED",{}).get("last_passing_level") or -1
+        m=row["model"]; candidates.append((float(gain),int(ret),-i,ModelSpec(m["model"],m.get("label",m["model"]),int(m.get("context_limit",25600)),int(m.get("output_budget",192)),float(m.get("temperature",0.0)),bool(m.get("enabled",True)))))
+    if not candidates: raise RuntimeError("NO_VALID_007_MODEL_EVIDENCE")
+    candidates.sort(reverse=True,key=lambda x:x[:3]); return candidates[0][3]
+
+
+def load_profile(path: Path) -> dict[str, Any]: return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main(argv: list[str] | None=None) -> int:
+    p=argparse.ArgumentParser(); p.add_argument("--models-config"); p.add_argument("--profile"); p.add_argument("--from-007"); p.add_argument("--output-dir",default="results/008-architecture-discovery")
+    p.add_argument("--audit-only",action="store_true"); p.add_argument("--preflight-only",action="store_true"); p.add_argument("--product-gate-only",action="store_true"); a=p.parse_args(argv)
+    out=Path(a.output_dir)
+    if a.audit_only:
+        report=synthetic_audit(out); print(json.dumps(report,indent=2)); return 0 if report["passed"] else 2
+    if a.product_gate_only:
+        report=openadapt_product_gate(out); print(json.dumps(report,indent=2)); return 0 if report["passed"] else 2
+    if not a.models_config: p.error("--models-config is required for live modes")
+    ollama_url,models=load_models(Path(a.models_config))
+    try:
+        from .repaired_memory_frontier import CapabilityAwareOllamaClient as LiveClient
+    except ImportError as exc:
+        print(json.dumps({"passed":False,"status":"COMPONENT_UNAVAILABLE","error":repr(exc)},indent=2)); return 2
+    if a.preflight_only:
+        report=live_preflight(models,LiveClient,ollama_url,out); print(json.dumps(report,indent=2)); return 0 if report["passed"] else 2
+    if not a.profile: p.error("--profile required for experiment run")
+    if not a.from_007: p.error("--from-007 required for experiment run")
+    selected=select_model_from_007(Path(a.from_007)); allowed={m.model:m for m in models}
+    if selected.model not in allowed: raise SystemExit("007-selected model is not present in 008 live model config")
+    selected=allowed[selected.model]
+    pre=live_preflight([selected],LiveClient,ollama_url,out/"live-gate")
+    if not pre["passed"]:
+        print(json.dumps({"experiment_started":False,"reason":"LIVE_PREFLIGHT_FAILED","preflight":pre},indent=2)); return 3
+    profile=load_profile(Path(a.profile))
+    if bool(profile.get("require_openadapt_product_gate", True)):
+        product_gate=openadapt_product_gate(out/"product-gate", float(profile.get("openadapt_gate_timeout_seconds",900)))
+        if not product_gate["passed"]:
+            print(json.dumps({"experiment_started":False,"reason":"OPENADAPT_PRODUCT_GATE_FAILED","product_gate":product_gate},indent=2)); return 3
+    ledger=build_ledger(selected.model,profile); runner=ArchitectureRunner(selected,LiveClient,ollama_url,out,retry_count=int(profile.get("retry_count",3)),timeout_seconds=float(profile.get("call_timeout_seconds",600)),progress_every=int(profile.get("progress_every",10)))
+    summary=runner.run(ledger); print(json.dumps(summary,indent=2)); return 0 if summary["experiment_complete_valid"] else 4
+
+
+if __name__=="__main__": raise SystemExit(main())
