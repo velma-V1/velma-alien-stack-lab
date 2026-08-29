@@ -1,0 +1,161 @@
+
+# Rank valid 007 models by preregistered evidence, then select the highest-ranked
+# model that also passes the 008 live capability gate.
+def rank_models_from_007(summary_path: Path) -> list[ModelSpec]:
+    doc = json.loads(summary_path.read_text(encoding="utf-8"))
+    candidates = []
+    for i, row in enumerate(doc.get("models", [])):
+        if not row.get("experiment_valid", row.get("completed", False)):
+            continue
+        if not row.get("paired_packet_count"):
+            continue
+        gain = row.get("paired_retrieved_minus_none_mean")
+        if gain is None:
+            continue
+        retrieved = (row.get("analysis") or {}).get("RETRIEVED", {})
+        frontier = retrieved.get("last_passing_level")
+        if frontier is None:
+            frontier = -1
+        m = row["model"]
+        spec = ModelSpec(
+            m["model"],
+            m.get("label", m["model"]),
+            int(m.get("context_limit", 25600)),
+            int(m.get("output_budget", 192)),
+            float(m.get("temperature", 0.0)),
+            bool(m.get("enabled", True)),
+        )
+        candidates.append((float(gain), int(frontier), -i, spec))
+    if not candidates:
+        raise RuntimeError("NO_VALID_007_MODEL_EVIDENCE")
+    candidates.sort(reverse=True, key=lambda x: x[:3])
+    return [row[3] for row in candidates]
+
+
+def select_model_from_007(summary_path: Path) -> ModelSpec:
+    return rank_models_from_007(summary_path)[0]
+
+
+def choose_compatible_007_model(
+    ranked: list[ModelSpec],
+    allowed: dict[str, ModelSpec],
+    gate_fn: Callable[[ModelSpec], dict[str, Any]],
+) -> tuple[ModelSpec, list[dict[str, Any]]]:
+    attempts: list[dict[str, Any]] = []
+    for candidate in ranked:
+        configured = allowed.get(candidate.model)
+        if configured is None:
+            attempts.append({
+                "model": candidate.model,
+                "label": candidate.label,
+                "passed": False,
+                "status": "MODEL_NOT_IN_008_CONFIG",
+            })
+            continue
+        report = gate_fn(configured)
+        passed = bool(report.get("passed"))
+        attempts.append({
+            "model": configured.model,
+            "label": configured.label,
+            "passed": passed,
+            "status": "OK" if passed else "LIVE_PREFLIGHT_FAILED",
+            "preflight": report,
+        })
+        if passed:
+            return configured, attempts
+    raise RuntimeError("NO_007_RANKED_MODEL_PASSES_008_LIVE_GATE")
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--models-config")
+    p.add_argument("--profile")
+    p.add_argument("--from-007")
+    p.add_argument("--output-dir", default="results/008-architecture-discovery")
+    p.add_argument("--audit-only", action="store_true")
+    p.add_argument("--preflight-only", action="store_true")
+    p.add_argument("--product-gate-only", action="store_true")
+    a = p.parse_args(argv)
+    out = Path(a.output_dir)
+
+    if a.audit_only:
+        report = synthetic_audit(out)
+        print(json.dumps(report, indent=2))
+        return 0 if report["passed"] else 2
+    if a.product_gate_only:
+        report = openadapt_product_gate(out)
+        print(json.dumps(report, indent=2))
+        return 0 if report["passed"] else 2
+    if not a.models_config:
+        p.error("--models-config is required for live modes")
+
+    ollama_url, models = load_models(Path(a.models_config))
+    try:
+        from .repaired_memory_frontier import CapabilityAwareOllamaClient as LiveClient
+    except ImportError as exc:
+        print(json.dumps({"passed": False, "status": "COMPONENT_UNAVAILABLE", "error": repr(exc)}, indent=2))
+        return 2
+
+    if a.preflight_only:
+        report = live_preflight(models, LiveClient, ollama_url, out)
+        print(json.dumps(report, indent=2))
+        return 0 if report["passed"] else 2
+
+    if not a.profile:
+        p.error("--profile required for experiment run")
+    if not a.from_007:
+        p.error("--from-007 required for experiment run")
+
+    ranked = rank_models_from_007(Path(a.from_007))
+    allowed = {m.model: m for m in models if m.enabled}
+
+    def gate(spec: ModelSpec) -> dict[str, Any]:
+        safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", spec.label)
+        return live_preflight([spec], LiveClient, ollama_url, out / "live-gate" / safe_label)
+
+    try:
+        selected, selection_attempts = choose_compatible_007_model(ranked, allowed, gate)
+    except RuntimeError as exc:
+        failure = {
+            "experiment_started": False,
+            "reason": str(exc),
+            "ranked_007_models": [asdict(m) for m in ranked],
+        }
+        atomic_json(out / "model-selection-gate.json", failure)
+        print(json.dumps(failure, indent=2))
+        return 3
+
+    selection_report = {
+        "selected": asdict(selected),
+        "rule": "highest-ranked valid 007 model that passes the 008 live capability gate",
+        "attempts": selection_attempts,
+    }
+    atomic_json(out / "model-selection-gate.json", selection_report)
+
+    profile = load_profile(Path(a.profile))
+    if bool(profile.get("require_openadapt_product_gate", True)):
+        product_gate = openadapt_product_gate(
+            out / "product-gate",
+            float(profile.get("openadapt_gate_timeout_seconds", 900)),
+        )
+        if not product_gate["passed"]:
+            print(json.dumps({
+                "experiment_started": False,
+                "reason": "OPENADAPT_PRODUCT_GATE_FAILED",
+                "product_gate": product_gate,
+            }, indent=2))
+            return 3
+
+    ledger = build_ledger(selected.model, profile)
+    runner = ArchitectureRunner(
+        selected,
+        LiveClient,
+        ollama_url,
+        out,
+        retry_count=int(profile.get("retry_count", 3)),
+        timeout_seconds=float(profile.get("call_timeout_seconds", 600)),
+        progress_every=int(profile.get("progress_every", 10)),
+    )
+    summary = runner.run(ledger)
+    print(json.dumps(summary, indent=2))
+    return 0 if summary["experiment_complete_valid"] else 4
