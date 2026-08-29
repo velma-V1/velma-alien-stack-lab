@@ -32,6 +32,7 @@ jobs:
             tests.test_computational_atlas \
             tests.test_computational_atlas_claims \
             tests.test_computational_atlas_live \
+            tests.test_computational_atlas_live_harness \
             tests.test_solver_kill_test \
             tests.test_architecture_discovery \
             -v
