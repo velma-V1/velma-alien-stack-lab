@@ -4,17 +4,23 @@
 
 Experiment 010 discovers which external computational capabilities can make a small-model VELMA system materially more capable, how those capabilities interact, where neural reasoning is still required, and which discoveries are worth later promotion into `velma-V1/V31m4`.
 
-This is an architecture-discovery experiment, not a pass/fail referendum on VELMA. A valid unresolved result is evidence about the next bottleneck. The top-level valid completion state is:
+This is an architecture-discovery program, not a pass/fail referendum on VELMA. Valid unresolved results are evidence about the next bottleneck. The test itself is adversarially frozen after preregistration; evidence may change the system under test, but never the test in our favor.
+
+Top-level valid completion state:
 
 ```text
 DISCOVERY_COMPLETE
 ```
 
-The full design is in:
+## Source of truth
 
 ```text
+experiments/010-computational-basis-atlas/PREREGISTRATION-C-I-v1.md
 docs/superpowers/specs/2026-08-29-experiment-010-computational-basis-atlas-design.md
+experiments/010-computational-basis-atlas/README.md
 ```
+
+If they conflict, the frozen preregistration wins.
 
 ## Laboratory versus production
 
@@ -35,11 +41,11 @@ Eight capability classes are tested without assuming they are complete:
 - `D` — relational/analytical data operations
 - `R` — retrieval/evidence operations
 
-The built-in implementations are deterministic **reference engines used to test the architecture and evidence machinery**. They are not automatically the implementations that V31M4 should ship. Production promotion should prefer mature replaceable implementations behind V31M4 contracts when evidence supports them.
+The built-in implementations are deterministic **reference engines used to test architecture and evidence machinery**. They are not automatically production implementations for V31M4.
 
 ## World set
 
-The default generator creates 192 sealed base worlds across 12 behavioral families with this required-computation distribution:
+The default generator creates 192 sealed base worlds across 12 behavioral families:
 
 ```text
 64  primarily one capability
@@ -49,19 +55,46 @@ The default generator creates 192 sealed base worlds across 12 behavioral famili
  8  intentionally outside the initial basis
 ```
 
-The eight outside-basis worlds are discovery probes. They are not infrastructure failures and they do not terminate the experiment.
+The eight outside-basis worlds are discovery probes. They are valid unresolved evidence, not infrastructure failures.
 
-## Deterministic phases implemented in v1
+## Frozen test rule
+
+```text
+IF result is bad:
+    keep result
+    improve system
+    rerun same frozen test when comparison is required
+
+IF objective ceiling saturation is proven:
+    preserve all v1 evidence
+    append HARDER_EXTENSION_vN
+    never weaken/replace/rescale v1
+```
+
+Tasks, seeds, phase membership, arms, scoring, budgets, rescue order, fairness rules, and invalidation semantics are frozen by `PREREGISTRATION-C-I-v1.md`.
+
+## Current implementation/evidence gate
+
+```text
+A/B := BUILT + EXECUTED + VERIFIED deterministic evidence
+C/D := BUILT live test/runtime + identity-sealed evidence harness; next live evidence target
+E/F := frozen + reference test/runtime infrastructure exists; not the current live gate
+G/H/I := FROZEN DEFINITIONS/LEDGERS ONLY; live/system runtime intentionally absent
+```
+
+No code path in the current live harness can advance into G/H/I.
+
+Before accepting the first real C/D model result, the adversarial Claude preflight in `CURRENT_TASK.md` must report `READY_FOR_LIVE_C_D := YES` and the normal independent GPT verification still applies.
+
+## Deterministic Phases A/B
 
 ### Phase A — exact attribution
 
-64 balanced oracle-IR diagnostic worlds are executed against every subset of the eight basis capabilities:
+64 balanced oracle-IR diagnostic worlds execute against every subset of the eight basis capabilities:
 
 ```text
 64 × 256 = 16,384 cells
 ```
-
-This supports minimum-basis attribution and engine-necessity/overlap analysis without neural-model noise.
 
 ### Phase B — broad oracle ceiling
 
@@ -71,44 +104,57 @@ All 192 worlds receive the full basis and each of eight leave-one-out variants:
 192 × 9 = 1,728 cells
 ```
 
-Combined deterministic atlas size:
+Combined deterministic atlas:
 
 ```text
 18,112 cells
 ```
 
-All deterministic cells use zero neural model calls.
+All A/B deterministic cells use zero neural model calls.
+
+## Frozen C–I sizes
+
+The preregistered live definitions remain fixed even though implementation is gated:
+
+```text
+C = 3,840 cells
+D =   576 cells
+E =   864 cells
+F = 1,152 cells
+G =   864 cells
+H =   120 cells
+I =   288 cells
+-------------
+    7,704 cells
+```
+
+The existence of G/H/I ledger definitions does **not** authorize implementing or executing their system mechanisms before the explicit evidence gate.
 
 ## Evidence levels — do not conflate them
 
-010 deliberately distinguishes three evidence classes.
-
 ### 1. Measured experiment evidence
 
-A real ledger cell executed by the atlas runner and independently scored by its deterministic verifier. Phase A/B results belong here.
+A real preregistered ledger cell executed and independently scored under a sealed run identity.
 
 ### 2. Controlled mechanism audit
 
-A synthetic intervention with a known injected fault used to prove that the **experiment machinery** can localize or account for a mechanism correctly. Examples include rescue-stage injection and capability-reuse accounting.
-
-These audits are labeled explicitly, including:
+A deterministic/fake-provider intervention used to prove that experiment machinery behaves correctly. It must retain an explicit non-live evidence kind such as:
 
 ```text
 CONTROLLED_RESCUE_AUDIT
 SYNTHETIC_MECHANISM_AUDIT
+FAKE_MECHANICS_ONLY
 ```
 
-They must never be reported as proof of live-model capability.
+Controlled audits are never live-model capability evidence.
 
 ### 3. Pending live evidence
 
-Questions involving a real semantic compiler, model router, frontier model, perceptual model, or true deployment cost remain explicit pending evidence until that phase actually runs.
-
-Pending evidence is not converted into zero and not silently inferred from deterministic tests.
+A preregistered question whose real model/system phase has not run. Pending evidence is not converted into zero and is not inferred from deterministic tests.
 
 ## Rescue semantics
 
-The approved rescue ladder is:
+Frozen order:
 
 ```text
 original system path
@@ -121,9 +167,9 @@ original system path
   -> verifier discrimination
 ```
 
-A rescue is diagnostic. It never overwrites the original cell score.
+A rescue is diagnostic and never overwrites the original score.
 
-Bottleneck labels are:
+Bottleneck labels:
 
 ```text
 SEMANTIC
@@ -135,6 +181,7 @@ EXECUTION
 VERIFICATION
 MISSING_CAPABILITY
 AMBIGUOUS_INPUT
+PERCEPTION
 ```
 
 ## Generated discovery outputs
@@ -162,33 +209,37 @@ The report contract reserves 20 maps:
 19. rescue bottlenecks
 20. next-direction Pareto set
 
-A map whose required live phase has not run must say so explicitly rather than fabricate evidence.
+A map whose required live phase has not run must explicitly remain pending.
 
 ## Question coverage
 
-The reporting contract preserves the Q0–Q26 scientific tribunal, with Q14 interpreted as the cheapest discriminating experiment that maximally changes the next decision. It adds Q27–Q36 for V31M4 production/promotion consequences.
+010 preserves the Q0–Q26 scientific tribunal with Q14 interpreted as the cheapest discriminating experiment that maximally changes the next decision. It adds Q27–Q36 for V31M4 production/promotion consequences and the approved 32 capability/system/production questions.
 
-The experiment is also required to answer the approved 32 capability/system/production questions from the design document.
+The on-demand Claude tribunal is located at:
 
-## Profiles
+```text
+.claude/skills/010-tribunal/
+```
 
-### `smoke`
+## GPT ↔ Claude control structure
 
-Credential-free CI profile with a reduced Phase A/B ledger. It verifies contracts, sealing, replay, reporting, and regressions quickly.
+```text
+CLAUDE.md
+    permanent concise 010 constitution
 
-### `atlas`
+.claude/rules/experiment-010.md
+    path-scoped coding/evidence rules
 
-Full 18,112-cell deterministic Phase A/B profile. No model service is required.
+.claude/skills/010-tribunal/
+    on-demand Q0-Q36 + mandatory-32 adversarial review
 
-### `local`
+experiments/010-computational-basis-atlas/CURRENT_TASK.md
+    replaceable GPT -> Claude task packet
+```
 
-Adds local semantic/router/model phases when a provider-neutral live adapter is configured. Until configured, live evidence remains `MODEL_UNAVAILABLE` with `score=null`.
+`CURRENT_TASK.md` may select work but may never override the preregistration.
 
-### `frontier`
-
-Adds paired frontier calibration in equivalent generic tool environments. Provider credentials and model identifiers are runtime configuration rather than hard-coded scientific assumptions.
-
-## Run
+## Deterministic runs
 
 Smoke:
 
@@ -199,7 +250,7 @@ python3 -m alien_lab.computational_atlas \
   --profile smoke
 ```
 
-Full deterministic atlas:
+Full A/B atlas:
 
 ```bash
 python3 -m alien_lab.computational_atlas \
@@ -208,40 +259,65 @@ python3 -m alien_lab.computational_atlas \
   --profile atlas
 ```
 
-Exit codes:
+The older base-runner `local` / `frontier` profile names are **not** the accepted live C/D evidence path. They remain non-evidence placeholders in the A/B runner and must not be used to claim live results.
 
-- `0` — all required work for the selected credential-free profile is accounted for and the report was generated;
-- `2` — invalid configuration, harness failure, corrupted evidence, changed-ledger output-directory mismatch, or another invalid execution condition.
+## Live C/D execution path
 
-There is deliberately no capability-failure exit code. Valid unresolved tasks remain scored evidence and the run continues.
+After adversarial preflight approval, the full live C/D run uses the dedicated identity-sealed harness:
+
+```bash
+python3 -m alien_lab.computational_atlas_live_experiment \
+  --output-dir results/010-live-cd/<system-version>-<model> \
+  --model-id <ollama-model-id> \
+  --endpoint http://127.0.0.1:11434 \
+  --system-version <immutable-system-version> \
+  --model-digest <digest-if-known> \
+  --context-limit <model-context-limit> \
+  --phases CD
+```
+
+The harness freezes before the first scored cell:
+
+```text
+system_version
+provider_kind
+model_id
+model_digest when supplied
+provider_version when supplied
+endpoint
+generation contract
+prompt contract hash
+C/D ledger hash
+```
+
+It rejects output-directory reuse if run or ledger identity changes. Valid cell evidence is immutable/hash-checked. `--rerun-invalid` may recompute only prior `score=null` infrastructure cells; valid scored evidence is never silently replaced.
+
+Current live phases accepted by this harness:
+
+```text
+C
+D
+```
+
+G/H/I are intentionally not accepted CLI choices.
 
 ## Evidence durability
 
-The runner uses:
+The deterministic and live runners use the applicable subset of:
 
-- deterministic preregistered ledger construction;
+- preregistered deterministic ledgers;
 - SHA-256 ledger identity;
+- sealed run identity;
 - SHA-256 per-cell evidence envelopes;
 - atomic writes;
 - resumable terminal cells;
-- changed-ledger output-directory refusal;
-- deterministic replay fingerprint;
+- changed-identity output-directory refusal;
 - explicit invalid versus valid-unresolved semantics;
-- no capability-based early termination.
-
-Outputs include:
-
-```text
-ledger.json
-ledger-manifest.json
-cells/*.json
-summary.json
-discovery-report.json
-production-fitness.json
-```
+- no capability-based early termination;
+- transport retry accounting.
 
 ## Current scientific boundary
 
-The deterministic atlas can establish whether the **external-computation architecture and attribution machinery** behave as designed under correct formal representation. It cannot by itself establish Opus/Fable-class breadth, natural-language formalization quality, live local-model routing quality, perceptual understanding, or real V31M4 target-host cost.
+A/B establish the computational substrate under correct formal representation. C/D are the next live target and will measure the semantic/formalization interface and constrained-repair effect.
 
-Those remain later measured phases. The experiment is designed so those results can be added without changing the identity or interpretation of the deterministic evidence already collected.
+E/F remain frozen reference infrastructure and must not be changed to accommodate C/D outcomes. G/H/I remain definition-only until the explicit evidence gate. Nothing in the current repository establishes Opus/Fable-class breadth, live capability accumulation, long-horizon advantage, or frontier-system superiority yet.
