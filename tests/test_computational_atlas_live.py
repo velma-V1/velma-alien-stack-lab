@@ -150,5 +150,84 @@ class FrozenLiveContractTests(unittest.TestCase):
         self.assertEqual(generic_tool_schema_bytes(), velma_tool_schema_bytes())
 
 
+class LiveExecutionTests(unittest.TestCase):
+    def test_phase_c_oracle_and_semantic_compiler_reach_same_verified_result(self):
+        from alien_lab.computational_atlas_live_ledger import build_phase_c_ledger
+        from alien_lab.computational_atlas_live_runner import run_phase_c_cell
+        from alien_lab.computational_atlas_providers import FakeProvider
+        from alien_lab.computational_atlas_surfaces import oracle_unbound_ir
+        from alien_lab.computational_atlas_worlds import build_worlds
+
+        world = build_worlds(seed=20260910, count=1)[0]
+        oracle_cell = next(cell for cell in build_phase_c_ledger() if cell.world_index == 0 and cell.representation == "R2_NATURAL" and cell.arm == "ORACLE_IR_BASIS")
+        compiler_cell = next(cell for cell in build_phase_c_ledger() if cell.world_index == 0 and cell.representation == "R2_NATURAL" and cell.arm == "LOCAL_SEMANTIC_COMPILER_BASIS")
+        oracle = run_phase_c_cell(oracle_cell, provider=None)
+        fake = FakeProvider(model_id="fake", scripted=[oracle_unbound_ir(world).to_dict()])
+        compiled = run_phase_c_cell(compiler_cell, provider=fake)
+        self.assertEqual(oracle["score"], 1)
+        self.assertEqual(compiled["score"], 1)
+        self.assertEqual(compiled["result"], oracle["result"])
+        self.assertEqual(compiled["model_calls"], 1)
+
+    def test_phase_c_wrong_direct_answer_stays_zero_after_rescue(self):
+        from alien_lab.computational_atlas_live_ledger import build_phase_c_ledger
+        from alien_lab.computational_atlas_live_runner import rescue_phase_c_outcome, run_phase_c_cell
+        from alien_lab.computational_atlas_providers import FakeProvider
+        from alien_lab.computational_atlas_worlds import build_worlds
+
+        cell = next(cell for cell in build_phase_c_ledger() if cell.world_index == 0 and cell.representation == "R2_NATURAL" and cell.arm == "MODEL_DIRECT")
+        outcome = run_phase_c_cell(cell, provider=FakeProvider(model_id="fake", scripted=[{"result": ["wrong"]}]))
+        world = build_worlds(seed=20260910, count=1)[0]
+        rescue = rescue_phase_c_outcome(outcome, world)
+        self.assertEqual(outcome["score"], 0)
+        self.assertEqual(rescue["original_score"], 0)
+        self.assertEqual(rescue["rescued_score"], 1)
+        self.assertEqual(outcome["score"], 0)
+
+    def test_phase_d_repair_uses_exactly_one_extra_call_and_can_recover(self):
+        from alien_lab.computational_atlas_live_ledger import build_phase_d_ledger
+        from alien_lab.computational_atlas_live_runner import run_phase_d_cell
+        from alien_lab.computational_atlas_providers import FakeProvider
+        from alien_lab.computational_atlas_surfaces import oracle_unbound_ir
+        from alien_lab.computational_atlas_worlds import build_worlds
+
+        world = build_worlds(seed=20260911, count=65)[64]
+        cell = next(cell for cell in build_phase_d_ledger() if cell.world_index == 64 and cell.representation == "R3_PARAPHRASED" and cell.arm == "SCHEMA_VALIDATE_REPAIR")
+        provider = FakeProvider(model_id="fake", scripted=[{"task_id": "", "operations": []}, oracle_unbound_ir(world).to_dict()])
+        outcome = run_phase_d_cell(cell, provider=provider)
+        self.assertEqual(outcome["score"], 1)
+        self.assertEqual(outcome["model_calls"], 2)
+        self.assertTrue(outcome["repair_used"])
+
+    def test_phase_e_decoy_selection_is_routing_failure_but_oracle_route_succeeds(self):
+        from alien_lab.computational_atlas_live_ledger import build_phase_e_ledger
+        from alien_lab.computational_atlas_live_runner import run_phase_e_cell
+        from alien_lab.computational_atlas_providers import FakeProvider
+
+        oracle_cell = next(cell for cell in build_phase_e_ledger() if cell.world_index == 0 and cell.arm == "ORACLE_ROUTER" and cell.condition == "CATALOG_32")
+        model_cell = next(cell for cell in build_phase_e_ledger() if cell.world_index == 0 and cell.arm == "LOCAL_MODEL_ROUTER" and cell.condition == "CATALOG_32")
+        oracle = run_phase_e_cell(oracle_cell, provider=None)
+        bad = run_phase_e_cell(model_cell, provider=FakeProvider(model_id="fake", scripted=[{"selected_tools": ["sequence_advisor"]}]))
+        self.assertEqual(oracle["score"], 1)
+        self.assertEqual(bad["score"], 0)
+        self.assertEqual(bad["status"], "VALID_UNRESOLVED_ROUTING")
+        self.assertGreater(bad["decoy_selection_rate"], 0)
+
+    def test_phase_f_typed_handoff_creates_capability_unavailable_to_single_or_no_handoff(self):
+        from alien_lab.computational_atlas_live_ledger import build_phase_f_ledger
+        from alien_lab.computational_atlas_live_runner import run_phase_f_cell
+
+        no_handoff_cell = next(cell for cell in build_phase_f_ledger() if cell.world_index == 0 and cell.arm == "ALL_ENGINES_NO_TYPED_HANDOFF")
+        typed_cell = next(cell for cell in build_phase_f_ledger() if cell.world_index == 0 and cell.arm == "TYPED_COMPOSITION_VERIFIED")
+        single_cell = next(cell for cell in build_phase_f_ledger() if cell.world_index == 0 and cell.arm == "SINGLE_G")
+        no_handoff = run_phase_f_cell(no_handoff_cell, provider=None)
+        typed = run_phase_f_cell(typed_cell, provider=None)
+        single = run_phase_f_cell(single_cell, provider=None)
+        self.assertEqual(no_handoff["score"], 0)
+        self.assertEqual(single["score"], 0)
+        self.assertEqual(typed["score"], 1)
+        self.assertTrue(typed["measured_synergy_candidate"])
+
+
 if __name__ == "__main__":
     unittest.main()
