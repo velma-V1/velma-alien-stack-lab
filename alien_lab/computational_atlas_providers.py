@@ -13,6 +13,8 @@ from .computational_atlas_types import stable_hash
 class ModelProvider(Protocol):
     model_id: str
     endpoint: str
+    provider_kind: str
+    supports_structured_output: bool
     transport_retries_total: int
 
     def complete(self, request: ModelRequest) -> ModelResponse: ...
@@ -32,11 +34,26 @@ def _parse_json_text(text: str) -> Any:
     return json.loads(raw)
 
 
+def parse_model_json(response: ModelResponse) -> Any:
+    """Parse model JSON identically regardless of experimental arm.
+
+    Provider-side structured output may populate ``parsed_json`` directly, but
+    FREE_JSON and constrained arms use the same fallback reader so markdown
+    fencing cannot become an arm-specific advantage.
+    """
+    if response.parsed_json is not None:
+        return response.parsed_json
+    return _parse_json_text(response.text)
+
+
 def seal_run_identity(identity: RunIdentity) -> str:
     return stable_hash(identity.to_dict())
 
 
 class FakeProvider:
+    provider_kind = "fake"
+    supports_structured_output = True
+
     def __init__(self, model_id: str, scripted: list[Any]):
         self.model_id = model_id
         self.endpoint = "fake://experiment-010"
@@ -64,6 +81,9 @@ class FakeProvider:
 
 
 class _HTTPProviderBase:
+    provider_kind = "http"
+    supports_structured_output = False
+
     def __init__(self, *, model_id: str, endpoint: str, timeout: float = 180.0, transport: Callable[[urllib.request.Request, float], bytes] | None = None):
         self.model_id = model_id
         self.endpoint = endpoint.rstrip("/")
@@ -94,6 +114,9 @@ class _HTTPProviderBase:
 
 
 class OllamaProvider(_HTTPProviderBase):
+    provider_kind = "ollama"
+    supports_structured_output = True
+
     @staticmethod
     def default_path() -> str:
         return "/api/chat"
@@ -128,6 +151,9 @@ class OllamaProvider(_HTTPProviderBase):
 
 
 class AnthropicMessagesProvider(_HTTPProviderBase):
+    provider_kind = "anthropic"
+    supports_structured_output = False
+
     def __init__(self, *, model_id: str, endpoint: str = "https://api.anthropic.com", api_key: str, anthropic_version: str = "2023-06-01", timeout: float = 180.0, transport: Callable[[urllib.request.Request, float], bytes] | None = None):
         super().__init__(model_id=model_id, endpoint=endpoint, timeout=timeout, transport=transport)
         self.api_key = api_key
