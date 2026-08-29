@@ -10,6 +10,7 @@ on:
       - 'experiments/010-computational-basis-atlas/**'
       - 'docs/superpowers/specs/2026-08-29-experiment-010-computational-basis-atlas-design.md'
       - 'docs/superpowers/plans/2026-08-29-experiment-010-computational-basis-atlas.md'
+      - 'docs/superpowers/plans/2026-08-29-experiment-010-c-i-live-phases.md'
       - '.github/workflows/010-smoke.yml'
   workflow_dispatch:
 
@@ -28,6 +29,7 @@ jobs:
           python -m unittest \
             tests.test_computational_atlas \
             tests.test_computational_atlas_claims \
+            tests.test_computational_atlas_live \
             tests.test_solver_kill_test \
             tests.test_architecture_discovery \
             -v
