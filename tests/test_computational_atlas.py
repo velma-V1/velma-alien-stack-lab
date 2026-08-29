@@ -17,6 +17,11 @@ from alien_lab.computational_atlas_models import (
     build_production_fitness_record,
     unavailable_model_evidence,
 )
+from alien_lab.computational_atlas_report import (
+    build_accumulation_audit,
+    build_discovery_report,
+    run_rescue_probe,
+)
 from alien_lab.computational_atlas_worlds import build_worlds
 
 
@@ -104,6 +109,9 @@ class ComputationalAtlasLedgerTests(unittest.TestCase):
             self.assertEqual(first["terminal_cells"], first["expected_cells"])
             self.assertEqual(first["replay_fingerprint"], second["replay_fingerprint"])
             self.assertEqual(first["ledger_hash"], second["ledger_hash"])
+            self.assertEqual(first["question_coverage"]["mandatory_32"], 32)
+            self.assertEqual(first["question_coverage"]["tribunal_q0_q36"], 37)
+            self.assertEqual(len(first["production_fitness_records"]), 8)
 
     def test_changed_ledger_cannot_reuse_output_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,6 +141,71 @@ class ComputationalAtlasDiagnosisTests(unittest.TestCase):
                 self.assertEqual(diagnose_rescue(False, rescue_results), stage)
         self.assertEqual(diagnose_rescue(False, {name: False for name in stages}), "MISSING_CAPABILITY")
         self.assertEqual(diagnose_rescue(True, {}), "NONE")
+
+    def test_controlled_rescue_probe_preserves_original_failure_and_localizes_stage(self) -> None:
+        world = build_worlds(seed=9, count=192)[130]
+        for stage in ("SEMANTIC", "DECOMPOSITION", "ROUTING", "ENGINE", "COMPOSITION", "EXECUTION", "VERIFICATION"):
+            with self.subTest(stage=stage):
+                probe = run_rescue_probe(world, injected_fault=stage)
+                self.assertEqual(probe["original_score"], 0)
+                self.assertEqual(probe["localized_bottleneck"], stage)
+                self.assertTrue(probe["rescued"])
+        outside = build_worlds(seed=9, count=192)[190]
+        probe = run_rescue_probe(outside, injected_fault="MISSING_CAPABILITY")
+        self.assertEqual(probe["original_score"], 0)
+        self.assertFalse(probe["rescued"])
+        self.assertEqual(probe["localized_bottleneck"], "MISSING_CAPABILITY")
+
+    def test_multi_engine_world_requires_complete_composition(self) -> None:
+        world = build_worlds(seed=13, count=192)[170]
+        self.assertGreaterEqual(len(world.required_capabilities), 4)
+        report = run_rescue_probe(world, injected_fault="COMPOSITION")
+        self.assertEqual(report["localized_bottleneck"], "COMPOSITION")
+        self.assertEqual(report["original_score"], 0)
+        self.assertEqual(report["rescued_score"], 1)
+
+
+class ComputationalAtlasLearningTests(unittest.TestCase):
+    def test_executable_capability_audit_reduces_reasoning_calls_across_lineages(self) -> None:
+        audit = build_accumulation_audit(seed=20260829, lineage_count=48)
+        self.assertEqual(audit["lineages"], 48)
+        self.assertEqual(audit["stages_per_lineage"], 6)
+        self.assertEqual(audit["evidence_kind"], "SYNTHETIC_MECHANISM_AUDIT")
+        no_retained = audit["arms"]["NO_RETAINED_CAPABILITY"]
+        executable = audit["arms"]["VERIFIED_EXECUTABLE_CAPABILITY"]
+        self.assertLess(executable["reasoning_calls"], no_retained["reasoning_calls"])
+        self.assertEqual(executable["incorrect_reuse"], 0)
+        self.assertGreater(executable["reuse_events"], 0)
+
+
+class ComputationalAtlasReportTests(unittest.TestCase):
+    def test_discovery_report_contains_all_required_maps(self) -> None:
+        worlds = build_worlds(seed=22, count=192)
+        report = build_discovery_report(worlds=worlds, phase_maps={"minimum_basis": {}, "leave_one_out": {}, "computational_coverage": {}})
+        required_maps = {
+            "computational_coverage",
+            "minimum_basis",
+            "unique_engine_value",
+            "synergy_matrix",
+            "substitution_redundancy",
+            "semantic_degradation",
+            "semantic_error_taxonomy",
+            "decomposition_error_rate",
+            "routing_regret",
+            "tool_overload",
+            "model_dependence_pareto",
+            "verification_value",
+            "silent_wrong_rate",
+            "capability_learning",
+            "transfer_drift",
+            "horizon_curve",
+            "frontier_gap",
+            "missing_capability_clusters",
+            "rescue_bottlenecks",
+            "next_direction_pareto",
+        }
+        self.assertEqual(set(report["maps"]), required_maps)
+        self.assertEqual(report["conclusion_semantics"], "DISCOVERY_NOT_PASS_FAIL")
 
 
 class ComputationalAtlasProductionTests(unittest.TestCase):
