@@ -41,6 +41,7 @@ class Tests(unittest.TestCase):
     def test_unresolved_drift_halts_not_guesses(self):
         base=build_task(4,"drift_resolution",24,"NOVEL","same"); drift=build_task(4,"drift_resolution",24,"DRIFT","same")
         s=SkillRegistry(); by={a.semantic_id:a for a in base.actions}; skill=s.compile_verified(base,base.required_semantics,tuple(by[x].locator for x in base.required_semantics),"e",True)
+        # Destroy labels too, forcing unresolved at severity >1.
         bad=TaskSpec(drift.task_id,drift.family,drift.difficulty,drift.stage,drift.lineage,drift.seed,drift.initial,
                      tuple(SurfaceAction(a.semantic_id,a.locator,a.label+"x",a.slot,a.op,a.target,a.arg,a.forbidden) for a in drift.actions),drift.required_semantics,drift.public_flag,drift.silent_fault,drift.drift_severity,drift.oracle_final,drift.oracle_hash)
         plan,_,err=s.resolve(bad,skill); self.assertIsNone(plan); self.assertTrue(err.startswith("UNRESOLVED"))
@@ -190,6 +191,7 @@ class Tests(unittest.TestCase):
             p=Path(td); model=ModelSpec("m","m",100000); client=ScriptClient()
             r=ArchitectureRunner(model,lambda _:client,"",p,retry_count=1,progress_every=999)
             a=build_ledger("m",{"seeds":[1],"families":["linear_dependency"],"factorial_difficulties":[2],"frontier_topologies":0,"lifecycle":[]})[:1]
+            # Use missing model to avoid depending on a correct plan; manifest is still sealed.
             r=ArchitectureRunner(model,lambda _:ScriptClient(missing=True),"",p,retry_count=1,progress_every=999); r.run(a)
             b=build_ledger("m",{"seeds":[2],"families":["linear_dependency"],"factorial_difficulties":[2],"frontier_topologies":0,"lifecycle":[]})[:1]
             with self.assertRaises(RuntimeError): ArchitectureRunner(model,lambda _:ScriptClient(missing=True),"",p,retry_count=1).run(b)
