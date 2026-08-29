@@ -1,0 +1,40 @@
+{
+  "experiment_id": "009-solver-kill-test",
+  "solvable_count": 64,
+  "silent_control_count": 16,
+  "unseen_seeds": [
+    20260901,
+    20260902,
+    20260903,
+    20260904,
+    20260905,
+    20260906,
+    20260907,
+    20260908,
+    20260909,
+    20260910,
+    20260911,
+    20260912,
+    20260913,
+    20260914,
+    20260915,
+    20260916
+  ],
+  "solvable_families": [
+    "linear_dependency",
+    "conditional_branch",
+    "multi_record_join",
+    "loop_worklist",
+    "policy_guard",
+    "composition",
+    "drift_resolution"
+  ],
+  "solvable_stages": [
+    "NOVEL",
+    "PARAMETER_VARIATION",
+    "DRIFT",
+    "COMPOSITION",
+    "TRANSFER"
+  ],
+  "difficulties": [12, 16, 20, 24, 28, 32]
+}
