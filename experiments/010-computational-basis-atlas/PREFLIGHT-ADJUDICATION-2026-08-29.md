@@ -32,9 +32,17 @@ GPT:
     evidence analysis
     independent verification
 
+KIMI_WEBSITE:
+    frequent read-only adversarial reviewer
+    attacks design, code, claims, construct validity, and interpretation
+    cannot change repo or certify tests
+    every material Kimi claim must be independently reproduced by GPT before action
+
 CLAUDE:
     scarce independent adversarial reviewer
-    reserved for major irreversible gates
+    not routine reviewer
+    reserved for a major gate only when GPT+Kimi evidence leaves material uncertainty,
+    or for the C-F architecture tribunal before G/H/I system mechanisms are designed
 
 FROZEN_010:
     referee
@@ -43,10 +51,22 @@ MEASURED_DATA:
     scientific authority over architecture claims
 ```
 
-Claude is reserved for:
+### Reviewer escalation rule
 
-1. a narrow final red-team immediately before accepting the first live C/D evidence;
-2. a major C-F architecture tribunal before live G/H/I mechanisms are designed.
+```text
+GPT builds/tests
+    -> Kimi read-only attack
+    -> GPT reproduces/refutes Kimi findings
+    -> tests/data decide
+
+IF material disagreement remains AND current evidence cannot discriminate:
+    use Q14 := cheapest discriminating check
+
+IF high-impact ambiguity still remains after discrimination:
+    Claude narrow red-team may be authorized by user
+```
+
+Model agreement is never evidence.
 
 ## Q0-Q36 adjudication rule
 
@@ -54,6 +74,37 @@ For each proposed fix or architectural claim:
 
 ```text
 CHECK:
+    Q0  decisive question still unasked
+    Q1  actual success requirement
+    Q2  true failure class
+    Q3  assumptions to attack
+    Q4  causally proven mechanisms/effect size
+    Q5  serious alternative solution classes
+    Q6  architecture without current-path anchoring
+    Q7  strongest discriminating next action
+    Q8  model capability fundamentally missing
+    Q9  independent computation that can supply it
+    Q10 typed information exchange
+    Q11 complementary capability per component
+    Q12 strongest architecture consistent with evidence
+    Q13 structural ceilings
+    Q14 cheapest decision-changing discrimination
+    Q15 proof capability was created, not rearranged
+    Q16 falsifier for our interpretation
+    Q17 proxy vs direct measurement
+    Q18 evidence threshold for architecture change
+    Q19 serious alternatives remaining
+    Q20 best architecture if forced to choose now
+    Q21 causal accounting for claimed gain
+    Q22 largest verified contribution
+    Q23 necessity from ablation/leave-one-out
+    Q24 exact end-to-end point where capability appears/disappears
+    Q25 genuine causal synergy
+    Q26 strongest argument against preferred interpretation
+    Q27-Q36 production seam, authority, economics, isolation, verification,
+            replaceability, ROI, roadmap displacement, compounding, competitive consequence
+
+ALWAYS CHECK:
     construct validity
     direct measure vs proxy
     causal isolation
@@ -165,6 +216,42 @@ GUARD:
     stages that are structurally indistinguishable for a given cell must be reported explicitly rather than fabricated.
     rescue evidence is diagnostic only.
 
+## Previously reported implementation defects — GPT reproduction queue
+
+Claude's review additionally reported these concrete defects. They are not accepted as fixed until reproduced on the shared branch:
+
+```text
+1. D repair incorrectly triggered on verifier failure rather than TaskIR invalidity
+2. free vs constrained JSON had asymmetric parser behavior
+3. provider structured-output support could be silently absent
+4. repair-call transport failure could become capability zero
+5. provider identity could be caller-asserted and fixture evidence mislabeled live
+6. deterministic recognizer copied sealed/oracle metadata
+7. outside-basis localization differed by arm
+8. existing R5 leakage guard did not inspect image content comprehensively
+```
+
+GPT must reproduce each with a failing test before changing production behavior.
+
+## Kimi read-only review contract
+
+After GPT reports the pre-live implementation green, Kimi receives only the shared branch plus a narrow review request.
+
+Kimi must:
+
+```text
+ASSUME GPT may be wrong
+ASSUME green tests may encode bad assumptions
+USE Q0-Q36 + mandatory 32 questions
+ATTACK construct validity, causal validity, leakage, fairness, proxies, unsupported claims
+DO NOT redesign the test merely because a result may be unfavorable
+DO NOT claim a code/test execution occurred if website access cannot execute it
+RETURN blockers, weaknesses, unsupported claims, strongest counterargument,
+       what C/D can prove, what C/D cannot prove, confidence
+```
+
+GPT then reproduces or refutes each material Kimi finding before live evidence.
+
 ## Anti-overfitting promotion rule
 
 A system change is suspect if it cannot be described without benchmark internals.
@@ -182,21 +269,28 @@ IF false:
     reject production promotion until independently justified
 ```
 
-## Staged evidence loop
+## Rebuilt staged evidence loop
 
 ```text
 A/B evidence
-    -> restore/verify C/D instruments
-    -> final narrow Claude red-team
+    -> GPT reproduce Claude implementation findings under TDD
+    -> GPT restore/verify A/B/D/E instruments and C claim guard
+    -> GPT full Q0-Q36 pre-live self-attack
+    -> Kimi read-only Q0-Q36 red-team
+    -> GPT reproduce/refute Kimi findings
+    -> IF unresolved high-impact ambiguity remains: user may authorize narrow Claude gate
     -> freeze S0 + M0
     -> run C/D
     -> GPT Q0-Q36 evidence analysis
+    -> Kimi independent result interpretation
+    -> GPT reproduce/adjudicate disagreements using Q14 discrimination
     -> build only causally justified S1
     -> rerun same C/D when comparison is needed
     -> E
     -> tribunal
     -> F
-    -> full C-F tribunal
+    -> full C-F GPT+Kimi tribunal
+    -> reserve Claude for unresolved major architecture gate if needed
     -> HARD STOP before G/H/I
 ```
 
