@@ -311,6 +311,7 @@ class CDPreflightRegressionTests(unittest.TestCase):
         }
         rescue = rescue_phase_c_outcome(original, world)
         self.assertEqual(rescue["original_score"], 0)
+        self.assertIn("stages", rescue)
         self.assertEqual(
             [stage["stage"] for stage in rescue["stages"]],
             [
