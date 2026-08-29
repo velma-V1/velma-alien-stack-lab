@@ -1,0 +1,210 @@
+        summary = analyze(self.output_dir, ledger)
+        atomic_json(self.output_dir / "summary.json", summary); return summary
+
+
+def wilson(successes: int, n: int, z: float=1.96) -> tuple[float | None, float | None]:
+    if n <= 0: return None, None
+    p = successes/n; den = 1 + z*z/n; center = (p + z*z/(2*n))/den
+    half = z*math.sqrt((p*(1-p)+z*z/(4*n))/n)/den
+    return max(0.0, center-half), min(1.0, center+half)
+
+
+def analyze(output_dir: Path, ledger: list[LedgerCell]) -> dict[str, Any]:
+    store = EvidenceStore(output_dir)
+    all_evidence = {e.cell_id: e for e in store.all()}
+    ledger_ids = {c.cell_id for c in ledger}
+    evidence = {cid: ev for cid, ev in all_evidence.items() if cid in ledger_ids}
+    orphan_evidence = sorted(set(all_evidence) - ledger_ids)
+    missing = [c.cell_id for c in ledger if c.required and c.cell_id not in evidence]
+    recovered_corrupt = len(list((output_dir / "quarantine").glob("*"))) if (output_dir / "quarantine").exists() else 0
+    statuses: dict[str, int] = {}
+    valid: list[TrialEvidence] = []
+    for ev in evidence.values():
+        statuses[ev.status] = statuses.get(ev.status, 0) + 1
+        if CellStatus(ev.status) in VALID_SCORED:
+            valid.append(ev)
+
+    # Factorial conclusions use only fully paired eight-arm blocks. Invalid cells
+    # cannot silently change a denominator or bias an interaction estimate.
+    block_map: dict[tuple[Any, ...], dict[str, TrialEvidence]] = {}
+    for ev in valid:
+        if ev.phase != "FACTORIAL":
+            continue
+        t = ev.task_public
+        key = (t.get("family"), t.get("difficulty"), t.get("stage"), t.get("lineage"), t.get("task_id"))
+        block_map.setdefault(key, {})[ev.architecture["name"]] = ev
+    paired_blocks = {k: v for k, v in block_map.items() if set(v) == {a.name for a in FACTORIAL_ARMS}}
+
+    by_arch: dict[str, dict[str, Any]] = {}
+    for arch in [a.name for a in FACTORIAL_ARMS]:
+        rows = [block[arch] for block in paired_blocks.values()]
+        n = len(rows)
+        successes = sum(e.score == 1 for e in rows)
+        ci = wilson(successes, n)
+        by_arch[arch] = {
+            "n": n, "successes": successes,
+            "success_rate": successes / n if n else None,
+            "ci95": list(ci),
+            "model_calls": sum(e.model_calls for e in rows),
+            "mean_model_calls": (sum(e.model_calls for e in rows) / n) if n else None,
+            "tokens": sum(e.prompt_tokens + e.eval_tokens for e in rows),
+            "mean_tokens": (sum(e.prompt_tokens + e.eval_tokens for e in rows) / n) if n else None,
+            "verified_successes_per_model_call": (successes / sum(e.model_calls for e in rows)) if sum(e.model_calls for e in rows) else (float("inf") if successes else None),
+            "safe_halts": sum(e.safe_halt for e in rows),
+            "silent_wrong_effects": sum(bool(e.screen_success and not e.authoritative_success and not e.safe_halt) for e in rows),
+        }
+
+    def rate(name: str) -> float | None:
+        return by_arch.get(name, {}).get("success_rate")
+
+    effects: dict[str, float | None] = {}
+    base = rate("MODEL_ONLY")
+    for name in ("ALIEN", "VELMA", "OPENADAPT", "VELMA_ALIEN", "ALIEN_OPENADAPT",
+                 "VELMA_OPENADAPT", "VELMA_ALIEN_OPENADAPT"):
+        r = rate(name)
+        effects[name + "_minus_MODEL_ONLY"] = (r - base) if r is not None and base is not None else None
+    rA, rV, rO, rAV, rAO, rVO, rAVO = map(rate, (
+        "ALIEN", "VELMA", "OPENADAPT", "VELMA_ALIEN", "ALIEN_OPENADAPT",
+        "VELMA_OPENADAPT", "VELMA_ALIEN_OPENADAPT"))
+    if None not in (base, rA, rV, rO, rAV, rAO, rVO, rAVO):
+        effects["A_x_V"] = rAV - rA - rV + base
+        effects["A_x_O"] = rAO - rA - rO + base
+        effects["V_x_O"] = rVO - rV - rO + base
+        effects["A_x_V_x_O"] = rAVO - rAV - rAO - rVO + rA + rV + rO - base
+
+    placement: dict[str, Any] = {}
+    expected_locations = {
+        "PLACEMENT_ALIEN": set(ALIEN_LOCATIONS),
+        "PLACEMENT_OPENADAPT": set(OPENADAPT_LOCATIONS),
+        "PLACEMENT_VELMA": set(VELMA_LOCATIONS),
+    }
+    for phase in ("PLACEMENT_ALIEN", "PLACEMENT_OPENADAPT", "PLACEMENT_VELMA"):
+        blocks: dict[tuple[Any, ...], dict[str, TrialEvidence]] = {}
+        for e in valid:
+            if e.phase != phase or e.task_public.get("stage") != "REPEAT":
+                continue
+            if phase == "PLACEMENT_ALIEN":
+                loc = e.architecture["alien_location"]
+            elif phase == "PLACEMENT_OPENADAPT":
+                loc = e.architecture["openadapt_location"]
+            else:
+                loc = e.architecture["velma_verification"]
+            t = e.task_public
+            key = (t.get("family"), t.get("difficulty"), t.get("stage"), t.get("lineage"), t.get("task_id"))
+            blocks.setdefault(key, {})[loc] = e
+        paired = {k: v for k, v in blocks.items() if set(v) == expected_locations[phase]}
+        groups: dict[str, list[TrialEvidence]] = {loc: [] for loc in expected_locations[phase]}
+        for block in paired.values():
+            for loc, e in block.items():
+                groups[loc].append(e)
+        placement[phase] = {
+            "paired_blocks": len(paired),
+            "locations": {
+                k: {"n": len(v), "success_rate": sum(x.score == 1 for x in v) / len(v) if v else None,
+                    "model_calls": sum(x.model_calls for x in v), "safe_halts": sum(x.safe_halt for x in v),
+                    "silent_wrong_effects": sum(bool(x.screen_success and not x.authoritative_success and not x.safe_halt) for x in v)}
+                for k, v in sorted(groups.items())
+            },
+        }
+
+    def topology_key(e: TrialEvidence) -> str:
+        a = e.architecture
+        return f"A={a['alien_location']}|O={a['openadapt_location']}|V={a['velma_verification']}"
+
+    lifecycle: dict[str, Any] = {}
+    for key in sorted({topology_key(e) for e in valid if e.phase == "LIFECYCLE"}):
+        rows = [e for e in valid if e.phase == "LIFECYCLE" and topology_key(e) == key]
+        by_stage: dict[str, Any] = {}
+        for stage in LIFECYCLE:
+            sr = [e for e in rows if e.task_public.get("stage") == stage]
+            if not sr:
+                continue
+            by_stage[stage] = {
+                "n": len(sr), "success_rate": sum(e.score == 1 for e in sr) / len(sr),
+                "model_calls": sum(e.model_calls for e in sr), "safe_halts": sum(e.safe_halt for e in sr),
+                "silent_wrong_effects": sum(bool(e.screen_success and not e.authoritative_success and not e.safe_halt) for e in sr),
+            }
+        lifecycle[key] = {
+            "n": len(rows), "success_rate": sum(e.score == 1 for e in rows) / len(rows) if rows else None,
+            "model_calls": sum(e.model_calls for e in rows), "safe_halts": sum(e.safe_halt for e in rows),
+            "silent_wrong_effects": sum(bool(e.screen_success and not e.authoritative_success and not e.safe_halt) for e in rows),
+            "by_stage": by_stage,
+        }
+
+    frontier: dict[str, Any] = {}
+    for key in sorted({topology_key(e) for e in valid if e.phase == "FRONTIER"}):
+        rows = [e for e in valid if e.phase == "FRONTIER" and topology_key(e) == key]
+        curves: dict[str, list[dict[str, Any]]] = {}
+        for stage in ("NOVEL", "REPEAT"):
+            levels = sorted({int(e.task_public.get("difficulty", 0)) for e in rows if e.task_public.get("stage") == stage})
+            curve = []
+            for diff in levels:
+                dr = [e for e in rows if e.task_public.get("stage") == stage and int(e.task_public.get("difficulty", 0)) == diff]
+                curve.append({"difficulty": diff, "n": len(dr), "success_rate": sum(e.score == 1 for e in dr) / len(dr) if dr else None,
+                              "model_calls": sum(e.model_calls for e in dr), "safe_halts": sum(e.safe_halt for e in dr)})
+            curves[stage] = curve
+        frontier[key] = {"curves": curves}
+
+    # Pareto frontier across complete lifecycle results: maximize verified success,
+    # minimize model calls and silent wrong effects. No opaque composite score.
+    pareto = []
+    keys = list(lifecycle)
+    for a in keys:
+        A = lifecycle[a]
+        dominated = False
+        for b in keys:
+            if a == b:
+                continue
+            B = lifecycle[b]
+            no_worse = (B["success_rate"] >= A["success_rate"] and B["model_calls"] <= A["model_calls"] and
+                        B["silent_wrong_effects"] <= A["silent_wrong_effects"])
+            strict = (B["success_rate"] > A["success_rate"] or B["model_calls"] < A["model_calls"] or
+                      B["silent_wrong_effects"] < A["silent_wrong_effects"])
+            if no_worse and strict:
+                dominated = True
+                break
+        if not dominated:
+            pareto.append(a)
+    valid_zero = sum(e.score == 0 for e in valid)
+    invalid = len(evidence) - len(valid)
+    model_dep = (sum(e.model_calls > 0 for e in valid) / len(valid)) if valid else None
+    execution_complete = len(evidence) == len(ledger) and not missing
+    experiment_complete_valid = execution_complete and invalid == 0 and not orphan_evidence and bool(paired_blocks)
+    if experiment_complete_valid:
+        conclusion = "VALID"
+    elif execution_complete and valid and paired_blocks:
+        conclusion = "PARTIAL_INVALID_EVIDENCE"
+    else:
+        conclusion = "INSUFFICIENT_VALID_EVIDENCE"
+    return {
+        "expected_cells": len(ledger), "terminal_cells": len(evidence),
+        "valid_scored_cells": len(valid), "valid_zero_cells": valid_zero,
+        "invalid_or_unscorable_cells": invalid, "missing_cells": missing,
+        "recovered_corrupt_evidence_files": recovered_corrupt, "orphan_evidence_cells": orphan_evidence, "status_counts": statuses,
+        "factorial_paired_blocks": len(paired_blocks), "factorial": by_arch,
+        "effects": effects, "placement": placement, "lifecycle": lifecycle, "frontier": frontier,
+        "pareto_topologies": pareto, "model_dependence_ratio": model_dep,
+        "silent_wrong_effect_count": sum(bool(e.screen_success and not e.authoritative_success and not e.safe_halt) for e in valid),
+        "safe_halt_count": sum(e.safe_halt for e in valid),
+        "execution_complete": execution_complete,
+        "experiment_complete_valid": experiment_complete_valid,
+        "conclusion_status": conclusion,
+    }
+
+
+class PerfectAuditClient:
+    """Harness-only deterministic client. It never participates in scientific runs."""
+    def __init__(self, base_url: str="", model_map: dict[str, TaskSpec] | None=None): self.model_map = model_map or {}; self.calls=[]
+    def model_metadata(self, model: str): return {"name": model, "capabilities": ["completion"]}
+    def generate(self, **kw):
+        self.calls.append(kw); prompt = kw["prompt"]; tid = re.search(r"TASK_ID=([0-9a-f]+)", prompt)
+        task = self.model_map.get(tid.group(1) if tid else "")
+        if "INDEPENDENT AUDITOR" in prompt:
+            response = json.dumps({"decision":"APPROVE"})
+        elif task:
+            by_sem = {a.semantic_id:a for a in task.actions}; response = json.dumps({"plan":[by_sem[s].locator for s in task.required_semantics]})
+        else: response = json.dumps({"plan":["node-00","node-01"]})
+        return type("R",(),{"status":"OK","response":response,"hit_ceiling":False,"prompt_tokens":10,"eval_tokens":5,"wall_ms":1.0,"done_reason":"stop"})()
+
+
+def synthetic_audit(output_dir: Path) -> dict[str, Any]:
