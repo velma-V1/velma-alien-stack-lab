@@ -38,6 +38,7 @@ class ModelResponse:
     error_kind: str | None = None
     error: str | None = None
     evidence_kind: str = "LIVE_MODEL_EVIDENCE"
+    transport_retries: int = 0
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -51,6 +52,8 @@ class RunIdentity:
     endpoint: str
     generation_contract: dict[str, Any]
     prompt_contract_hash: str
+    model_digest: str | None = None
+    provider_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
