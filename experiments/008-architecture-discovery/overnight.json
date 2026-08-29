@@ -1,0 +1,46 @@
+{
+  "seeds": [
+    20260829,
+    20260830
+  ],
+  "families": [
+    "linear_dependency",
+    "conditional_branch",
+    "multi_record_join",
+    "loop_worklist",
+    "policy_guard",
+    "composition",
+    "drift_resolution",
+    "silent_effect_fault"
+  ],
+  "factorial_difficulties": [
+    2,
+    6,
+    10,
+    14
+  ],
+  "placement_difficulty": 10,
+  "lifecycle": [
+    "NOVEL",
+    "REPEAT",
+    "PARAMETER_VARIATION",
+    "DRIFT",
+    "SILENT_EFFECT_FAULT",
+    "COMPOSITION",
+    "REPAIR",
+    "TRANSFER",
+    "LONG_RUN_1",
+    "LONG_RUN_2",
+    "LONG_RUN_3"
+  ],
+  "lifecycle_difficulty": 12,
+  "frontier_topologies": 3,
+  "frontier_start": 4,
+  "frontier_max": 32,
+  "frontier_step": 4,
+  "retry_count": 3,
+  "call_timeout_seconds": 600,
+  "progress_every": 10,
+  "require_openadapt_product_gate": true,
+  "openadapt_gate_timeout_seconds": 900
+}
