@@ -1,0 +1,15 @@
+{
+  "experiment": "010-computational-basis-atlas",
+  "profile": "atlas",
+  "seed": 20260829,
+  "world_count": 192,
+  "representation_levels": [
+    "R0_ORACLE_IR",
+    "R1_STRUCTURED",
+    "R2_NATURAL",
+    "R3_PARAPHRASED",
+    "R4_IMPLICIT",
+    "R5_PERCEPTUAL"
+  ],
+  "capabilities": ["G", "L", "C", "P", "X", "M", "D", "R"]
+}
