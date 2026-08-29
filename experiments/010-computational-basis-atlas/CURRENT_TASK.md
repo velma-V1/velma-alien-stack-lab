@@ -15,13 +15,15 @@ ASSUME:
 
 READ_FIRST:
     CLAUDE.md
-    experiments/010-computational-basis-atlas/PREREGISTRATION-C-I-v1.md [Phase C/D + global immutability/anti-cheating sections]
+    experiments/010-computational-basis-atlas/PREREGISTRATION-C-I-v1.md [global readiness + Phase C/D]
     alien_lab/computational_atlas_surfaces.py
     alien_lab/computational_atlas_semantics.py
     alien_lab/computational_atlas_providers.py
+    alien_lab/computational_atlas_live_types.py
     alien_lab/computational_atlas_live_ledger.py [C/D builders only]
     alien_lab/computational_atlas_live_runner.py [C/D functions only]
     tests/test_computational_atlas_live.py [C/D contract/execution tests]
+    tests/test_computational_atlas_claims.py [phase gate]
 
 SEARCH_IF_NEEDED:
     direct imports/dependencies of the above only
@@ -51,6 +53,12 @@ VERIFY:
     16. no post-hoc performance-based membership selection exists
     17. output/token/context settings cannot silently differ by arm except preregistered interface constraint
     18. no code path can auto-advance into G/H/I
+    19. a complete C/D live run has an executable batch/CLI path; unit-callable functions alone are NOT sufficient
+    20. run manifest seals system_version + provider_kind + model_id/digest when available + endpoint + generation contract + prompt contract + ledger identity BEFORE first live scored cell
+    21. output directory reuse with changed ledger/model/provider/system/prompt identity is rejected
+    22. fake-provider/controlled-fixture evidence can never be reported as LIVE_MODEL_EVIDENCE
+    23. per-cell evidence is immutable/hash-checked/resumable without silently repairing valid evidence
+    24. retry accounting matches preregistration and provider transport failure cannot become a capability zero
 
 ADVERSARIAL_CHECKS:
     SEARCH oracle contamination
@@ -61,6 +69,7 @@ ADVERSARIAL_CHECKS:
     SEARCH provider behavior inconsistent across arms
     SEARCH invalid evidence accidentally scored zero
     SEARCH output cap likely to invalidate strong models
+    SEARCH run-identity/evidence persistence gaps
     SEARCH any condition that makes us look better than reality
 
 IF defect_found:
@@ -80,10 +89,11 @@ PHASE_BOUNDARY:
     G/H/I := STOP
     do not implement runtime/system behavior
     do not add execution tests requiring G/H/I implementation
-    frozen G/H/I definitions may be inspected only if needed to prove no auto-advance path
+    frozen G/H/I definitions/ledgers may be inspected only if needed to prove no auto-advance path
 
 DONE_WHEN:
     C/D preregistration trace is complete
+    complete live C/D execution path is auditable and identity-sealed
     no unresolved blocker remains for live C/D execution
     test evidence is reproducible
     G/H/I boundary is confirmed closed
