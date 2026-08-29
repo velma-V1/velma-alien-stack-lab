@@ -1,0 +1,24 @@
+name: Experiment 008 smoke
+
+on:
+  push:
+    branches:
+      - experiment/008-architecture-discovery
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Import gate
+        run: python -c "import alien_lab.architecture_discovery; print('IMPORT_OK')"
+      - name: Unit and live-hardening tests
+        run: |
+          python -m unittest \
+            tests.test_architecture_discovery \
+            tests.test_architecture_live_hardening \
+            -v
