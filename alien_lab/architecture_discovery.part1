@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import random
+import re
+import shutil
+import statistics
+import subprocess
+import sys
+import time
+from dataclasses import asdict, dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+MODULUS = 997
+FAMILIES = (
+    "linear_dependency", "conditional_branch", "multi_record_join", "loop_worklist",
+    "policy_guard", "composition", "drift_resolution", "silent_effect_fault",
+)
+LIFECYCLE = (
+    "NOVEL", "REPEAT", "PARAMETER_VARIATION", "DRIFT", "SILENT_EFFECT_FAULT",
+    "COMPOSITION", "REPAIR", "TRANSFER", "LONG_RUN_1", "LONG_RUN_2", "LONG_RUN_3",
+)
+
+
+class CellStatus(str, Enum):
+    VALID_SUCCESS = "VALID_SUCCESS"
+    VALID_FAILURE = "VALID_FAILURE"
+    SAFE_HALT = "SAFE_HALT"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    COMPONENT_UNAVAILABLE = "COMPONENT_UNAVAILABLE"
+    OUTPUT_CAP_REACHED = "OUTPUT_CAP_REACHED"
+    FORMAT_UNSCORABLE = "FORMAT_UNSCORABLE"
+    CONTEXT_CAP_REACHED = "CONTEXT_CAP_REACHED"
+    INFRASTRUCTURE_UNSCORABLE = "INFRASTRUCTURE_UNSCORABLE"
+    ORACLE_INVALID = "ORACLE_INVALID"
+    HARNESS_INVALID = "HARNESS_INVALID"
+    CONFIG_INVALID = "CONFIG_INVALID"
+    SKIPPED_PREREGISTERED = "SKIPPED_PREREGISTERED"
+    PRODUCT_VALIDATION_UNAVAILABLE = "PRODUCT_VALIDATION_UNAVAILABLE"
+
+
+VALID_SCORED = {CellStatus.VALID_SUCCESS, CellStatus.VALID_FAILURE, CellStatus.SAFE_HALT}
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    model: str
+    label: str
+    context_limit: int = 25600
+    output_budget: int = 192
+    temperature: float = 0.0
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class ArchitectureConfig:
+    name: str
+    alien: bool
+    velma: bool
+    openadapt: bool
+    alien_location: str = "PRE_REASON_REPAIR_POSTVERIFY_LEARN"
+    openadapt_location: str = "EARLY_LOOKUP_POSTVERIFY_COMPILE"
+    velma_verification: str = "BOTH"
+
+
+FACTORIAL_ARMS = (
+    ArchitectureConfig("MODEL_ONLY", False, False, False),
+    ArchitectureConfig("ALIEN", True, False, False),
+    ArchitectureConfig("VELMA", False, True, False),
+    ArchitectureConfig("OPENADAPT", False, False, True),
+    ArchitectureConfig("VELMA_ALIEN", True, True, False),
+    ArchitectureConfig("ALIEN_OPENADAPT", True, False, True),
+    ArchitectureConfig("VELMA_OPENADAPT", False, True, True),
+    ArchitectureConfig("VELMA_ALIEN_OPENADAPT", True, True, True),
+)
+
+ALIEN_LOCATIONS = (
+    "PRE_REASON", "POST_PLAN_REFINE", "REPAIR_ONLY", "PRE_REASON_REPAIR",
+    "PRE_REASON_REPAIR_POSTVERIFY_LEARN", "PREVERIFY_LEARN_NEGATIVE_CONTROL",
+)
+OPENADAPT_LOCATIONS = (
+    "EARLY_LOOKUP_POSTVERIFY_COMPILE", "AFTER_PLAN_LOOKUP_POSTVERIFY_COMPILE",
+    "RESOLVER_POSTVERIFY_COMPILE", "REPAIR_ONLY", "POSTVERIFY_COMPILE_ONLY",
+    "PREVERIFY_COMPILE_NEGATIVE_CONTROL",
+)
+VELMA_LOCATIONS = ("PRE_EXEC_AUDIT", "POST_EFFECT_AUDIT", "BOTH")
+
+
+def stable_hash(value: Any) -> str:
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+@dataclass(frozen=True)
+class SurfaceAction:
+    semantic_id: str
+    locator: str
+    label: str
+    slot: int
+    op: str
+    target: int
+    arg: int
+    forbidden: bool = False
+
+
+@dataclass(frozen=True)
+class TaskSpec:
+    task_id: str
+    family: str
+    difficulty: int
+    stage: str
+    lineage: str
+    seed: int
+    initial: tuple[int, ...]
+    actions: tuple[SurfaceAction, ...]
+    required_semantics: tuple[str, ...]
+    public_flag: int
+    silent_fault: bool
+    drift_severity: int
+    oracle_final: tuple[int, ...]
+    oracle_hash: str
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id, "family": self.family, "difficulty": self.difficulty,
+            "stage": self.stage, "lineage": self.lineage, "initial": list(self.initial),
+            "public_flag": self.public_flag, "surface": [
+                {"locator": a.locator, "label": a.label, "slot": a.slot, "forbidden": a.forbidden}
+                for a in self.actions
+            ],
+        }
+
+
+@dataclass
+class MemoryRecord:
+    record_id: str
+    family: str
+    semantics: tuple[str, ...]
+    learned_stage: str
+    evidence_id: str
+    fingerprint: str
+
+
+@dataclass
+class AlienMemory:
+    records: dict[str, MemoryRecord] = field(default_factory=dict)
+
+    def retrieve(self, task: TaskSpec, limit: int = 4) -> list[MemoryRecord]:
+        rows = [r for r in self.records.values() if r.family == task.family]
+        rows.sort(key=lambda r: (r.learned_stage, r.record_id), reverse=True)
+        return rows[:limit]
+
+    def promote(self, task: TaskSpec, semantics: tuple[str, ...], evidence_id: str, verified: bool) -> MemoryRecord | None:
+        if not verified or not semantics:
+            return None
+        rid = "M" + stable_hash([task.family, semantics, evidence_id])[:12]
+        if rid in self.records:
+            return self.records[rid]
+        rec = MemoryRecord(rid, task.family, semantics, task.stage, evidence_id,
+                           stable_hash([rid, task.family, semantics, task.stage, evidence_id]))
+        self.records[rid] = rec
+        return rec
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: asdict(v) for k, v in self.records.items()}
+
+    @classmethod
+    def from_dict(cls, doc: dict[str, Any]) -> "AlienMemory":
+        return cls({k: MemoryRecord(**{**v, "semantics": tuple(v["semantics"])}) for k, v in doc.items()})
+
+
+@dataclass
+class CompiledSkill:
+    skill_id: str
+    family: str
+    semantics: tuple[str, ...]
+    learned_locators: tuple[str, ...]
+    learned_labels: tuple[str, ...]
+    learned_slots: tuple[int, ...]
+    evidence_id: str
+
+
+@dataclass
+class SkillRegistry:
+    skills: dict[str, CompiledSkill] = field(default_factory=dict)
+
+    def compile_verified(self, task: TaskSpec, semantics: tuple[str, ...], locators: tuple[str, ...], evidence_id: str,
+                         verified: bool) -> CompiledSkill | None:
+        if not verified or not semantics:
+            return None
+        by_sem = {a.semantic_id: a for a in task.actions}
+        labels = tuple(by_sem[s].label for s in semantics if s in by_sem)
+        slots = tuple(by_sem[s].slot for s in semantics if s in by_sem)
+        sid = "S" + stable_hash([task.family, semantics, evidence_id])[:12]
+        skill = CompiledSkill(sid, task.family, semantics, locators, labels, slots, evidence_id)
+        self.skills[sid] = skill
+        return skill
