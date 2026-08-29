@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
+import io
 import json
-import struct
-import zlib
+import textwrap
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -24,6 +23,7 @@ INTENT_BY_CAPABILITY = {
     "R": "evidence_rank",
     "U": "unclassified_problem",
 }
+LEGAL_INTENTS = tuple(INTENT_BY_CAPABILITY.values())
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,9 @@ class LiveSurface(dict):
 
     @property
     def sha256(self) -> str:
-        return self._image.sha256 if self._image is not None else hashlib.sha256(json.dumps(self, sort_keys=True).encode()).hexdigest()
+        if self._image is not None:
+            return self._image.sha256
+        return hashlib.sha256(json.dumps(self, sort_keys=True).encode()).hexdigest()
 
 
 def oracle_unbound_ir(world: World) -> UnboundTaskIR:
@@ -103,7 +105,7 @@ def task_ir_json_schema() -> dict[str, Any]:
                     "required": ["operation_id", "intent", "payload"],
                     "properties": {
                         "operation_id": {"type": "string"},
-                        "intent": {"type": "string"},
+                        "intent": {"type": "string", "enum": list(LEGAL_INTENTS)},
                         "payload": {"type": "object"},
                     },
                 },
@@ -142,33 +144,55 @@ def _text_rows(world: World) -> list[str]:
     return [_describe_payload(operation.intent, operation.payload) for operation in unbound.operations]
 
 
-def _png_chunk(kind: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", binascii.crc32(kind + data) & 0xFFFFFFFF)
+def _r5_document_text(world: World) -> str:
+    return "CASE " + world.world_id + "\n" + "\n".join(
+        f"{index + 1}. {row}" for index, row in enumerate(_text_rows(world))
+    )
 
 
 def _render_text_png(text: str, width: int = 960) -> bytes:
-    encoded = text.encode("utf-8")
-    bits: list[int] = []
-    for byte in encoded:
-        bits.extend((byte >> shift) & 1 for shift in range(7, -1, -1))
-        bits.extend([0, 0])
-    columns = max(80, min(width - 20, width))
-    rows = max(32, ((len(bits) + columns - 1) // columns) * 3 + 20)
-    pixels = bytearray()
-    for y in range(rows):
-        pixels.append(0)
-        for x in range(width):
-            bit_index = ((y - 10) // 3) * columns + (x - 10) if y >= 10 and x >= 10 else -1
-            on = 0 <= bit_index < len(bits) and bits[bit_index] == 1 and ((y - 10) % 3 == 1)
-            pixels.append(0 if on else 255)
-    ihdr = struct.pack(">IIBBBBB", width, rows, 8, 0, 0, 0, 0)
-    return b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", zlib.compress(bytes(pixels), 9)) + _png_chunk(b"IEND", b"")
+    """Render deterministic readable glyphs into a real PNG document artifact."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError as exc:  # pragma: no cover - CI installs the pinned dependency.
+        raise RuntimeError("R5_RENDERER_DEPENDENCY_MISSING:Pillow") from exc
+
+    font = ImageFont.load_default(size=18)
+    wrapped_lines: list[str] = []
+    for source_line in text.splitlines() or [""]:
+        parts = textwrap.wrap(
+            source_line,
+            width=92,
+            replace_whitespace=False,
+            drop_whitespace=False,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        wrapped_lines.extend(parts or [""])
+    rendered = "\n".join(wrapped_lines)
+
+    probe = Image.new("L", (width, 32), 255)
+    probe_draw = ImageDraw.Draw(probe)
+    bbox = probe_draw.multiline_textbbox((0, 0), rendered, font=font, spacing=6)
+    text_height = max(1, int(bbox[3] - bbox[1]))
+    height = max(64, text_height + 40)
+
+    image = Image.new("L", (width, height), 255)
+    draw = ImageDraw.Draw(image)
+    draw.multiline_text((20, 20), rendered, font=font, fill=0, spacing=6)
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=False, compress_level=9)
+    return output.getvalue()
 
 
 def render_live_surface(world: World, representation: str) -> LiveSurface:
     operations = oracle_unbound_ir(world).operations
     if representation == "R1_STRUCTURED":
-        content = {"case": world.world_id, "items": [_structured_operation(operation, index + 1) for index, operation in enumerate(operations)], "goal": "return each exact outcome in item order"}
+        content = {
+            "case": world.world_id,
+            "items": [_structured_operation(operation, index + 1) for index, operation in enumerate(operations)],
+            "goal": "return each exact outcome in item order",
+        }
         return LiveSurface(world.world_id, representation, content)
     rows = _text_rows(world)
     if representation == "R2_NATURAL":
@@ -176,15 +200,26 @@ def render_live_surface(world: World, representation: str) -> LiveSurface:
         return LiveSurface(world.world_id, representation, content)
     if representation == "R3_PARAPHRASED":
         reverse_rows = list(reversed(rows))
-        content = {"request": "The notes below were shuffled. Reconstruct the intended item order from their numbered positions, ignore irrelevant wording, and return the exact outcomes.", "notes": [{"position": len(rows) - index, "text": row} for index, row in enumerate(reverse_rows)], "distractors": ["Presentation order is not evidence of execution order.", "Do not assume approximate answers are acceptable."]}
+        content = {
+            "request": "The notes below were shuffled. Reconstruct the intended item order from their numbered positions, ignore irrelevant wording, and return the exact outcomes.",
+            "notes": [{"position": len(rows) - index, "text": row} for index, row in enumerate(reverse_rows)],
+            "distractors": ["Presentation order is not evidence of execution order.", "Do not assume approximate answers are acceptable."],
+        }
         return LiveSurface(world.world_id, representation, content)
     if representation == "R4_IMPLICIT":
-        content = {"request": "Infer what exact operations are necessary from these mixed records, then return one outcome per record group in group order.", "groups": [{"group": index + 1, "records": operation.payload} for index, operation in enumerate(operations)]}
+        content = {
+            "request": "Infer what exact operations are necessary from these mixed records, then return one outcome per record group in group order.",
+            "groups": [{"group": index + 1, "records": operation.payload} for index, operation in enumerate(operations)],
+        }
         return LiveSurface(world.world_id, representation, content)
     if representation == "R5_PERCEPTUAL":
-        text = "CASE " + world.world_id + "\n" + "\n".join(f"{index + 1}. {row}" for index, row in enumerate(rows))
-        raw = _render_text_png(text)
+        raw = _render_text_png(_r5_document_text(world))
         digest = hashlib.sha256(raw).hexdigest()
         image = LiveImage(media_type="image/png", base64_data=base64.b64encode(raw).decode("ascii"), sha256=digest)
-        return LiveSurface(world.world_id, representation, {"instruction": "Read the attached case image and return each exact outcome in item order."}, image=image)
+        return LiveSurface(
+            world.world_id,
+            representation,
+            {"instruction": "Read the attached case image and return each exact outcome in item order."},
+            image=image,
+        )
     raise ValueError(f"unsupported live representation: {representation}")
