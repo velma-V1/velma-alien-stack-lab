@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from .computational_atlas_types import stable_hash
 
@@ -32,20 +31,13 @@ class CapabilityLineage:
     seed: int
 
 
-@dataclass(frozen=True)
-class CapabilityPackage:
-    package_id: str
-    source_event_id: str
-    verified_source: bool
-    structural_signature: str
-    applicability_signature: str
-    provenance_hash: str
-
-    def can_apply(self, *, structural_signature: str, applicability_signature: str) -> bool:
-        return bool(self.verified_source and self.structural_signature == structural_signature and self.applicability_signature == applicability_signature)
-
-
 def build_lineages(seed: int = 20260914, count: int = 48) -> list[CapabilityLineage]:
+    """Build the frozen Phase G exam definition only.
+
+    Runtime capability-package creation/reuse is intentionally absent until the
+    explicit post-evidence G gate. This function freezes lineage membership and
+    task shape without pre-building the system mechanism being tested.
+    """
     if count != 48:
         raise ValueError("frozen Phase G requires exactly 48 lineages")
     reps = {
@@ -71,16 +63,3 @@ def build_lineages(seed: int = 20260914, count: int = 48) -> list[CapabilityLine
         )
         lineages.append(CapabilityLineage(lineage_id=lineage_id, events=events, seed=seed))
     return lineages
-
-
-def create_capability_package(*, event: LineageEvent, verified: bool, structural_signature: str, applicability_signature: str, provenance: Any) -> CapabilityPackage | None:
-    if not verified:
-        return None
-    return CapabilityPackage(
-        package_id=f"PKG-{stable_hash([event.event_id, structural_signature, applicability_signature])[:16]}",
-        source_event_id=event.event_id,
-        verified_source=True,
-        structural_signature=structural_signature,
-        applicability_signature=applicability_signature,
-        provenance_hash=stable_hash(provenance),
-    )
