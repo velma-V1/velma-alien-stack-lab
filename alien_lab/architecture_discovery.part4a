@@ -1,0 +1,105 @@
+                                          loc, base.velma_verification)
+                lineage = f"P-{seed}-{family}"
+                add("PLACEMENT_OPENADAPT", arch, family, diff, "NOVEL", lineage, seed)
+                add("PLACEMENT_OPENADAPT", arch, family, diff, "REPEAT", lineage, seed)
+            for loc in VELMA_LOCATIONS:
+                arch = ArchitectureConfig(base.name, True, True, True, base.alien_location,
+                                          base.openadapt_location, loc)
+                lineage = f"P-{seed}-{family}"
+                add("PLACEMENT_VELMA", arch, family, diff, "NOVEL", lineage, seed)
+                add("PLACEMENT_VELMA", arch, family, diff, "REPEAT", lineage, seed)
+
+    # Phase 3/4: causally motivated complete topologies over the full lifecycle.
+    topologies = profile.get("topologies") or [
+        asdict(base),
+        asdict(ArchitectureConfig("VELMA_ALIEN_OPENADAPT", True, True, True,
+                                  "PRE_REASON", "EARLY_LOOKUP_POSTVERIFY_COMPILE", "BOTH")),
+        asdict(ArchitectureConfig("VELMA_ALIEN_OPENADAPT", True, True, True,
+                                  "POST_PLAN_REFINE", "AFTER_PLAN_LOOKUP_POSTVERIFY_COMPILE", "PRE_EXEC_AUDIT")),
+        asdict(ArchitectureConfig("VELMA_ALIEN_OPENADAPT", True, True, True,
+                                  "PRE_REASON_REPAIR", "RESOLVER_POSTVERIFY_COMPILE", "BOTH")),
+    ]
+    for seed in seeds:
+        for family in families:
+            for i, adoc in enumerate(topologies):
+                arch = ArchitectureConfig(**adoc)
+                lineage = f"L-{seed}-{family}"
+                for stage in profile.get("lifecycle", list(LIFECYCLE)):
+                    add("LIFECYCLE", arch, family, profile.get("lifecycle_difficulty", 12),
+                        stage, lineage, seed)
+
+    # Phase 5: frontier does not stop after misses. NOVEL and REPEAT share a growing
+    # state lineage across all difficulty bands for a topology.
+    for seed in seeds:
+        for family in families:
+            for i, adoc in enumerate(topologies[:profile.get("frontier_topologies", 3)]):
+                arch = ArchitectureConfig(**adoc)
+                lineage = f"FR-{seed}-{family}"
+                for diff in range(profile.get("frontier_start", 4),
+                                  profile.get("frontier_max", 32) + 1,
+                                  profile.get("frontier_step", 4)):
+                    add("FRONTIER", arch, family, diff, "NOVEL", lineage, seed)
+                    add("FRONTIER", arch, family, diff, "REPEAT", lineage, seed)
+    return cells
+
+def _status_from_model(call: ModelCall) -> CellStatus | None:
+    if call.status == "OK": return None
+    try: return CellStatus(call.status)
+    except ValueError: return CellStatus.INFRASTRUCTURE_UNSCORABLE
+
+
+class ArchitectureRunner:
+    def __init__(self, model: ModelSpec, client_factory: Callable[[str], Any], ollama_url: str, output_dir: Path,
+                 retry_count: int = 3, timeout_seconds: float = 600.0, progress_every: int = 10):
+        self.model, self.client_factory, self.ollama_url, self.output_dir = model, client_factory, ollama_url, output_dir
+        self.retry_count, self.timeout_seconds, self.progress_every = retry_count, timeout_seconds, progress_every
+        self.store = EvidenceStore(output_dir)
+        self.states: dict[str, ArchitectureState] = {}
+        self.history_by_state: dict[str, list[TrialEvidence]] = {}
+        for ev in self.store.all():
+            self.history_by_state.setdefault(ev.state_key, []).append(ev)
+        for rows in self.history_by_state.values():
+            rows.sort(key=lambda e: e.cell_order)
+        self.completed = 0
+        self._model_metadata: dict[str, Any] | None = None
+
+    def _state_for(self, cell: LedgerCell) -> ArchitectureState:
+        if cell.state_key in self.states:
+            return self.states[cell.state_key]
+        rows = self.history_by_state.get(cell.state_key, [])
+        predecessors = [e for e in rows if e.cell_order < cell.order]
+        latest = predecessors[-1] if predecessors else None
+        state = ArchitectureState.from_dict(latest.state_after) if latest else ArchitectureState()
+        self.states[cell.state_key] = state
+        return state
+
+    def _invalid_evidence(self, cell: LedgerCell, task: TaskSpec, state: ArchitectureState, status: CellStatus, error: str,
+                          calls_before: int, gateway: ModelGateway | None = None) -> TrialEvidence:
+        calls_after = len(gateway.calls) if gateway else calls_before
+        fp = state.fingerprint()
+        return TrialEvidence(cell.cell_id, cell.order, cell.state_key, status.value, None, cell.phase, cell.model, asdict(cell.architecture), task.public_dict(), task.oracle_hash,
+                             state.to_dict(), state.to_dict(), fp, fp, calls_after-calls_before, 0, 0, 0.0, [], None, [], None, None, [],
+                             None, None, None, False, (gateway.calls[calls_before:] if gateway else []), error)
+
+    def run_cell(self, cell: LedgerCell) -> TrialEvidence:
+        existing = self.store.read(cell.cell_id)
+        if existing: return existing
+        task = build_task(cell.seed, cell.family, cell.difficulty, cell.stage, cell.lineage)
+        state = self._state_for(cell); before = state.to_dict(); before_fp = state.fingerprint()
+        client = self.client_factory(self.ollama_url); gateway = ModelGateway(client, self.model, self.retry_count, self.timeout_seconds)
+        calls_before = len(gateway.calls)
+        if self._model_metadata is not None:
+            gateway.metadata = self._model_metadata
+        try:
+            metadata = gateway.preflight_metadata() if gateway.metadata is None else gateway.metadata
+            self._model_metadata = metadata
+        except Exception as exc:
+            ev = self._invalid_evidence(cell, task, state, CellStatus.MODEL_UNAVAILABLE, repr(exc), calls_before, gateway); self.store.write(ev); return ev
+        arch = cell.architecture; retrieved: list[MemoryRecord] = []; skill = None; rungs: list[str] = []
+        plan: list[str] | None = None; skill_id = None; wall = 0.0; ptok = etok = 0
+        if arch.alien and arch.alien_location in {"PRE_REASON", "PRE_REASON_REPAIR", "PRE_REASON_REPAIR_POSTVERIFY_LEARN", "PREVERIFY_LEARN_NEGATIVE_CONTROL"}:
+            retrieved = state.memory.retrieve(task)
+        if arch.openadapt and arch.openadapt_location in {"EARLY_LOOKUP_POSTVERIFY_COMPILE", "PREVERIFY_COMPILE_NEGATIVE_CONTROL"}:
+            skill = state.skills.match(task)
+            if skill:
+                plan, rungs, err = state.skills.resolve(task, skill); skill_id = skill.skill_id
