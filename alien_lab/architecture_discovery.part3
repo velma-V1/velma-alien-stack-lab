@@ -1,0 +1,210 @@
+        think = self._think_arg()
+        failures = []
+        for attempt in range(1, self.retry_count + 1):
+            started = time.perf_counter()
+            try:
+                r = self.client.generate(model=self.spec.model, prompt=prompt, num_ctx=self.spec.context_limit,
+                                         num_predict=self.spec.output_budget, temperature=self.spec.temperature,
+                                         seed=seed, timeout_seconds=self.timeout_seconds, think=think)
+                rec = {"attempt": attempt, "status": getattr(r, "status", "OK"), "done_reason": getattr(r, "done_reason", ""),
+                       "hit_ceiling": bool(getattr(r, "hit_ceiling", False)), "think": think}
+                self.calls.append(rec)
+                if getattr(r, "hit_ceiling", False):
+                    failures.append(rec); continue
+                if getattr(r, "status", "OK") == "OK":
+                    return ModelCall("OK", getattr(r, "response", None), int(getattr(r, "prompt_tokens", 0)),
+                                     int(getattr(r, "eval_tokens", 0)), float(getattr(r, "wall_ms", (time.perf_counter()-started)*1000)),
+                                     str(getattr(r, "done_reason", "")), False)
+                failures.append(rec)
+            except Exception as exc:
+                rec = {"attempt": attempt, "status": "EXCEPTION", "error": repr(exc), "think": think}; self.calls.append(rec); failures.append(rec)
+        if failures and all(x.get("hit_ceiling") for x in failures):
+            return ModelCall(CellStatus.OUTPUT_CAP_REACHED.value, None, error=json.dumps(failures))
+        return ModelCall(CellStatus.INFRASTRUCTURE_UNSCORABLE.value, None, error=json.dumps(failures))
+
+
+@dataclass
+class ExecutionOutcome:
+    status: CellStatus
+    score: int | None
+    verified_success: bool | None
+    screen_success: bool | None
+    authoritative_success: bool | None
+    safe_halt: bool
+    semantics: tuple[str, ...]
+    locators: tuple[str, ...]
+    error: str | None = None
+
+
+def execute_plan(task: TaskSpec, locators: list[str]) -> ExecutionOutcome:
+    by_locator = {a.locator: a for a in task.actions}
+    semantics: list[str] = []
+    regs = list(task.initial)
+    for loc in locators:
+        action = by_locator.get(loc)
+        if action is None:
+            return ExecutionOutcome(CellStatus.VALID_FAILURE, 0, False, False, False, False, tuple(semantics), tuple(locators), f"UNKNOWN_LOCATOR:{loc}")
+        if action.forbidden:
+            return ExecutionOutcome(CellStatus.VALID_FAILURE, 0, False, False, False, False, tuple(semantics), tuple(locators), f"POLICY_VIOLATION:{loc}")
+        semantics.append(action.semantic_id); _apply(regs, action)
+    screen_success = tuple(semantics) == task.required_semantics
+    authoritative = tuple(regs) == task.oracle_final and tuple(semantics) == task.required_semantics
+    if task.silent_fault and screen_success:
+        authoritative = False
+    verified = bool(authoritative)
+    return ExecutionOutcome(CellStatus.VALID_SUCCESS if verified else CellStatus.VALID_FAILURE,
+                            1 if verified else 0, verified, screen_success, authoritative, False,
+                            tuple(semantics), tuple(locators), None if verified else "AUTHORITATIVE_EFFECT_MISMATCH")
+
+
+@dataclass(frozen=True)
+class LedgerCell:
+    cell_id: str
+    order: int
+    phase: str
+    model: str
+    architecture: ArchitectureConfig
+    family: str
+    difficulty: int
+    stage: str
+    lineage: str
+    seed: int
+    state_key: str
+    required: bool = True
+
+
+@dataclass
+class TrialEvidence:
+    cell_id: str
+    cell_order: int
+    state_key: str
+    status: str
+    score: int | None
+    phase: str
+    model: str
+    architecture: dict[str, Any]
+    task_public: dict[str, Any]
+    oracle_hash: str
+    state_before: dict[str, Any]
+    state_after: dict[str, Any]
+    state_before_fingerprint: str
+    state_after_fingerprint: str
+    model_calls: int
+    prompt_tokens: int
+    eval_tokens: int
+    wall_ms: float
+    retrieved_memory_ids: list[str]
+    skill_id: str | None
+    skill_resolution_rungs: list[str]
+    candidate_plan: list[str] | None
+    executed_plan: list[str] | None
+    semantics_executed: list[str]
+    screen_success: bool | None
+    authoritative_success: bool | None
+    verified_success: bool | None
+    safe_halt: bool
+    retry_events: list[dict[str, Any]]
+    error: str | None
+
+    def validate(self) -> None:
+        st = CellStatus(self.status)
+        if st in VALID_SCORED:
+            if self.score not in (0, 1): raise ValueError("valid scored cell must have 0/1 score")
+        elif self.score is not None:
+            raise ValueError(f"non-scored status {st} cannot have numeric score")
+
+
+class EvidenceStore:
+    def __init__(self, root: Path):
+        self.root = root
+        (root / "cells").mkdir(parents=True, exist_ok=True)
+
+    def path(self, cell_id: str) -> Path:
+        return self.root / "cells" / f"{cell_id}.json"
+
+    def write(self, ev: TrialEvidence) -> None:
+        ev.validate()
+        payload = asdict(ev)
+        envelope = {"evidence": payload, "sha256": stable_hash(payload)}
+        atomic_json(self.path(ev.cell_id), envelope)
+
+    def _decode(self, p: Path) -> TrialEvidence:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or "evidence" not in doc or "sha256" not in doc:
+            raise ValueError("evidence envelope missing")
+        payload = doc["evidence"]
+        if stable_hash(payload) != doc["sha256"]:
+            raise ValueError("evidence hash mismatch")
+        ev = TrialEvidence(**payload)
+        ev.validate()
+        return ev
+
+    def _quarantine(self, p: Path) -> None:
+        q = self.root / "quarantine"
+        q.mkdir(parents=True, exist_ok=True)
+        target = q / (p.name + f".{int(time.time()*1000)}.corrupt")
+        p.replace(target)
+
+    def read(self, cell_id: str) -> TrialEvidence | None:
+        p = self.path(cell_id)
+        if not p.exists():
+            return None
+        try:
+            return self._decode(p)
+        except Exception:
+            self._quarantine(p)
+            return None
+
+    def all(self) -> list[TrialEvidence]:
+        out = []
+        for p in sorted((self.root / "cells").glob("*.json")):
+            try:
+                out.append(self._decode(p))
+            except Exception:
+                self._quarantine(p)
+        return out
+
+def architecture_state_key(arch: ArchitectureConfig, family: str, lineage: str, seed: int) -> str:
+    return stable_hash([arch.name, asdict(arch), family, lineage, seed])[:20]
+
+
+def build_ledger(model: str, profile: dict[str, Any]) -> list[LedgerCell]:
+    cells: list[LedgerCell] = []
+    order = 0
+
+    def add(phase: str, arch: ArchitectureConfig, family: str, diff: int, stage: str,
+            lineage: str, seed: int, required: bool = True) -> None:
+        nonlocal order
+        state_key = architecture_state_key(arch, family, lineage, seed)
+        cid = stable_hash([phase, model, asdict(arch), family, diff, stage, lineage, seed])[:24]
+        cells.append(LedgerCell(cid, order, phase, model, arch, family, diff, stage,
+                                lineage, seed, state_key, required))
+        order += 1
+
+    seeds = profile.get("seeds", [20260829, 20260830])
+    families = profile.get("families", list(FAMILIES))
+
+    # Phase 1: complete 2x2x2 factorial. Each arm sees the same matched NOVEL -> REPEAT
+    # lineage so memory and skill compilation get a real chance to change behavior.
+    for seed in seeds:
+        for family in families:
+            for diff in profile.get("factorial_difficulties", [2, 6, 10, 14]):
+                lineage = f"F-{seed}-{family}-{diff}"
+                for stage in ("NOVEL", "REPEAT"):
+                    for arch in FACTORIAL_ARMS:
+                        add("FACTORIAL", arch, family, diff, stage, lineage, seed)
+
+    # Phase 2: one location variable changes at a time, but every candidate first
+    # gets a matched NOVEL learning cell and then the scored REPEAT location cell.
+    base = ArchitectureConfig("VELMA_ALIEN_OPENADAPT", True, True, True)
+    for seed in seeds:
+        for family in families:
+            diff = profile.get("placement_difficulty", 10)
+            for loc in ALIEN_LOCATIONS:
+                arch = ArchitectureConfig(base.name, True, True, True, loc,
+                                          base.openadapt_location, base.velma_verification)
+                lineage = f"P-{seed}-{family}"
+                add("PLACEMENT_ALIEN", arch, family, diff, "NOVEL", lineage, seed)
+                add("PLACEMENT_ALIEN", arch, family, diff, "REPEAT", lineage, seed)
+            for loc in OPENADAPT_LOCATIONS:
+                arch = ArchitectureConfig(base.name, True, True, True, base.alien_location,
