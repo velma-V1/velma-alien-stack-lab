@@ -1,0 +1,36 @@
+name: Experiment 009 Solver Kill Test
+
+on:
+  pull_request:
+    branches:
+      - experiment/008-architecture-discovery
+    paths:
+      - 'alien_lab/solver_kill_test.py'
+      - 'tests/test_solver_kill_test.py'
+      - 'experiments/009-solver-kill-test/**'
+      - '.github/workflows/009-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  solver-kill-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile Python sources
+        run: python -m compileall alien_lab tests
+      - name: Run 009 and 008 regression tests
+        run: |
+          python -m unittest \
+            tests.test_solver_kill_test \
+            tests.test_architecture_discovery \
+            -v
+      - name: Run preregistered 009 kill test
+        run: |
+          rm -rf /tmp/009-solver-kill-test
+          python -m alien_lab.solver_kill_test \
+            --config experiments/009-solver-kill-test/config.json \
+            --output-dir /tmp/009-solver-kill-test
+          cat /tmp/009-solver-kill-test/summary.json
