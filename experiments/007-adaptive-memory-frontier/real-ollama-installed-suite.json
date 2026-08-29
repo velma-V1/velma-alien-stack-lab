@@ -1,0 +1,22 @@
+{
+  "experiment_id": "007-real-ollama-installed-model-memory-frontier",
+  "seed": 20260828,
+  "ollama_url": "http://localhost:11434",
+  "max_level": 48,
+  "call_timeout_seconds": 600,
+  "retry_count": 3,
+  "models": [
+    {"model": "qwen3.5:9b", "label": "qwen3.5-9b-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "qwen3.5:9b-q8_0", "label": "qwen3.5-9b-q8_0", "quantization": "Q8_0", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "qwen3:8b", "label": "qwen3-8b-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "gemma3:12b", "label": "gemma3-12b-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "qwen3:14b", "label": "qwen3-14b-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "qwen2.5-coder:14b", "label": "qwen2.5-coder-14b-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "devstral-small-2:24b", "label": "devstral-small-2-24b-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0},
+    {"model": "huihui_ai/mistral-small-abliterated:24b", "label": "mistral-small-24b-abliterated-q4_k_m", "quantization": "Q4_K_M", "context_limit": 25600, "output_budget": 128, "temperature": 0.0}
+  ],
+  "unavailable_requested_models": [
+    {"model": "qwen3.8:27b", "reason": "not present in /api/tags on Ollama 0.32.15 at repair time"},
+    {"model": "AliBilge/Huihui-Devstral-Small-2-24B-Instruct-2512-abliterated:q4_k_m", "reason": "not present in /api/tags on Ollama 0.32.15 at repair time"}
+  ]
+}
