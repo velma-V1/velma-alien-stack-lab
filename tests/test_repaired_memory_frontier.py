@@ -10,10 +10,10 @@ from alien_lab.repaired_memory_frontier import Repaired007Runner
 
 class FakeClient:
     def __init__(self, base_url, *, models=None, ceiling=False):
-        self.models = models or {
+        self.models = {
             "thinking-model": {"name": "thinking-model", "capabilities": ["completion", "thinking"]},
             "plain-model": {"name": "plain-model", "capabilities": ["completion"]},
-        }
+        } if models is None else models
         self.ceiling = ceiling
         self.calls = []
 
