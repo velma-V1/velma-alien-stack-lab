@@ -13,6 +13,7 @@ from .computational_atlas_types import stable_hash
 class ModelProvider(Protocol):
     model_id: str
     endpoint: str
+    transport_retries_total: int
 
     def complete(self, request: ModelRequest) -> ModelResponse: ...
 
@@ -39,6 +40,7 @@ class FakeProvider:
     def __init__(self, model_id: str, scripted: list[Any]):
         self.model_id = model_id
         self.endpoint = "fake://experiment-010"
+        self.transport_retries_total = 0
         self._scripted = list(scripted)
         self._index = 0
 
@@ -66,6 +68,7 @@ class _HTTPProviderBase:
         self.model_id = model_id
         self.endpoint = endpoint.rstrip("/")
         self.timeout = float(timeout)
+        self.transport_retries_total = 0
         self._transport = transport or self._default_transport
 
     @staticmethod
@@ -110,6 +113,7 @@ class OllamaProvider(_HTTPProviderBase):
         if request.tools:
             payload["tools"] = list(request.tools)
         data, transport_error, elapsed, retries = self._post(self.default_path(), payload, {"Content-Type": "application/json"})
+        self.transport_retries_total += retries
         if data is None:
             return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error, transport_retries=retries)
         message_data = data.get("message") or {}
@@ -152,6 +156,7 @@ class AnthropicMessagesProvider(_HTTPProviderBase):
             payload,
             {"Content-Type": "application/json", "x-api-key": self.api_key, "anthropic-version": self.anthropic_version},
         )
+        self.transport_retries_total += retries
         if data is None:
             return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error, transport_retries=retries)
         stop_reason = data.get("stop_reason")
