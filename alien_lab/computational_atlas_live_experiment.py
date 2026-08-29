@@ -154,10 +154,15 @@ def _dispatch(cell: LiveCell, provider: ModelProvider | None) -> dict[str, Any]:
     raise ValueError(f"LIVE_PHASE_NOT_ENABLED:{cell.phase}")
 
 
-def _load_envelope(path: Path) -> dict[str, Any]:
+def _load_envelope(path: Path, *, identity_hash: str, cell: LiveCell) -> dict[str, Any]:
     envelope = json.loads(path.read_text(encoding="utf-8"))
     if stable_hash(envelope.get("payload")) != envelope.get("sha256"):
         raise ValueError(f"LIVE_EVIDENCE_HASH_MISMATCH:{path.stem}")
+    payload = envelope.get("payload") or {}
+    if payload.get("run_identity_hash") != identity_hash:
+        raise ValueError(f"LIVE_EVIDENCE_IDENTITY_MISMATCH:{path.stem}")
+    if payload.get("cell") != cell.to_dict():
+        raise ValueError(f"LIVE_EVIDENCE_CELL_MISMATCH:{path.stem}")
     return envelope
 
 
@@ -177,12 +182,16 @@ def run_live_cells(
         path = output_dir / "cells" / f"{cell.cell_id}.json"
         envelope: dict[str, Any] | None = None
         if path.exists():
-            envelope = _load_envelope(path)
+            envelope = _load_envelope(path, identity_hash=identity_hash, cell=cell)
             prior_score = (envelope.get("payload") or {}).get("outcome", {}).get("score")
             if prior_score is None and rerun_invalid:
                 envelope = None
         if envelope is None:
+            retries_before = int(getattr(provider, "transport_retries_total", 0) or 0) if provider is not None else 0
             outcome = _dispatch(cell, provider)
+            retries_after = int(getattr(provider, "transport_retries_total", retries_before) or 0) if provider is not None else retries_before
+            outcome = dict(outcome)
+            outcome["transport_retries"] = max(0, retries_after - retries_before)
             payload = {
                 "run_identity_hash": identity_hash,
                 "cell": cell.to_dict(),
