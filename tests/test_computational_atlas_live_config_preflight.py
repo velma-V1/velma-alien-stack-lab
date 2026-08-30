@@ -150,7 +150,7 @@ class LiveConfigurationPreflightTests(unittest.TestCase):
             )
             outcome = run_phase_c_cell(cell, NoVisionProvider())
             self.assertEqual(outcome["score"], 0)
-            self.assertEqual(outcome["status"], "VALID_UNRESOLVED_SEMANTIC")
+            self.assertEqual(outcome["status"], "VALID_UNRESOLVED_PERCEPTION")
             self.assertEqual(outcome["error_kind"], "UNSUPPORTED_MODALITY")
             self.assertTrue(outcome["unsupported_modality"])
             self.assertEqual(outcome["model_calls"], 0)
