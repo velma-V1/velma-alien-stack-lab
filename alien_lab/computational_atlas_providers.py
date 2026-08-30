@@ -35,12 +35,7 @@ def _parse_json_text(text: str) -> Any:
 
 
 def parse_model_json(response: ModelResponse) -> Any:
-    """Parse model JSON identically regardless of experimental arm.
-
-    Provider-side structured output may populate ``parsed_json`` directly, but
-    FREE_JSON and constrained arms use the same fallback reader so markdown
-    fencing cannot become an arm-specific advantage.
-    """
+    """Parse model JSON identically regardless of experimental arm."""
     if response.parsed_json is not None:
         return response.parsed_json
     return _parse_json_text(response.text)
@@ -96,9 +91,7 @@ class _HTTPProviderBase:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
 
-    def _post(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> tuple[dict[str, Any] | None, str | None, float, int]:
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        request = urllib.request.Request(self.endpoint + path, data=body, headers=headers, method="POST")
+    def _request_json(self, request: urllib.request.Request) -> tuple[dict[str, Any] | None, str | None, float, int]:
         start = time.perf_counter()
         last_error: str | None = None
         for attempt in range(3):
@@ -112,6 +105,15 @@ class _HTTPProviderBase:
                     break
         return None, last_error, (time.perf_counter() - start) * 1000.0, 2
 
+    def _get(self, path: str, headers: dict[str, str] | None = None) -> tuple[dict[str, Any] | None, str | None, float, int]:
+        request = urllib.request.Request(self.endpoint + path, headers=headers or {}, method="GET")
+        return self._request_json(request)
+
+    def _post(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> tuple[dict[str, Any] | None, str | None, float, int]:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(self.endpoint + path, data=body, headers=headers, method="POST")
+        return self._request_json(request)
+
 
 class OllamaProvider(_HTTPProviderBase):
     provider_kind = "ollama"
@@ -120,6 +122,15 @@ class OllamaProvider(_HTTPProviderBase):
     @staticmethod
     def default_path() -> str:
         return "/api/chat"
+
+    def server_version(self) -> str:
+        data, transport_error, _, _ = self._get("/api/version", {"Accept": "application/json"})
+        if data is None:
+            raise ValueError(f"PROVIDER_VERSION_UNAVAILABLE:{transport_error}")
+        version = str(data.get("version") or "").strip()
+        if not version:
+            raise ValueError("PROVIDER_VERSION_UNAVAILABLE:missing_version")
+        return version
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         message: dict[str, Any] = {"role": "user", "content": request.prompt}
