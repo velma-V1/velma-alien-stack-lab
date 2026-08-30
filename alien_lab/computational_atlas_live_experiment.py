@@ -172,6 +172,33 @@ def _validate_provider_identity(provider: ModelProvider | None, identity: RunIde
         if not bool(getattr(provider, "supports_structured_output", False)):
             raise ValueError("STRUCTURED_OUTPUT_UNSUPPORTED")
 
+        digest_reader = getattr(provider, "model_digest", None)
+        if not callable(digest_reader):
+            raise ValueError("MODEL_DIGEST_UNAVAILABLE")
+        actual_model_digest = str(digest_reader()).strip()
+        sealed_model_digest = str(identity.model_digest or "").strip()
+        if actual_model_digest and not sealed_model_digest:
+            raise ValueError("LIVE_MODEL_DIGEST_REQUIRED")
+        if sealed_model_digest != actual_model_digest:
+            raise ValueError(
+                f"MODEL_DIGEST_MISMATCH:sealed={sealed_model_digest}:actual={actual_model_digest}"
+            )
+
+        provider_context_limit = getattr(provider, "context_limit", None)
+        if provider_context_limit != context_limit:
+            raise ValueError(
+                f"PROVIDER_CONTEXT_LIMIT_MISMATCH:sealed={context_limit}:configured={provider_context_limit}"
+            )
+
+        capabilities_reader = getattr(provider, "model_capabilities", None)
+        if not callable(capabilities_reader):
+            raise ValueError("MODEL_CAPABILITIES_UNAVAILABLE")
+        capabilities = tuple(str(item) for item in capabilities_reader())
+        try:
+            setattr(provider, "supports_images", "vision" in capabilities)
+        except Exception:
+            pass
+
 
 def prepare_live_run(output_dir: Path, identity: RunIdentity, cells: list[LiveCell]) -> dict[str, Any]:
     output_dir = Path(output_dir)
@@ -449,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-id", required=True)
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--system-version", required=True)
-    parser.add_argument("--model-digest")
+    parser.add_argument("--model-digest", help="Optional asserted model digest; actual Ollama digest must match.")
     parser.add_argument("--provider-version", help="Optional asserted Ollama server version; actual /api/version must match.")
     parser.add_argument("--context-limit", type=int, required=True)
     parser.add_argument("--phases", choices=("C", "D", "CD"), default="CD")
@@ -457,15 +484,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     phases = ("C", "D") if args.phases == "CD" else (args.phases,)
-    provider = OllamaProvider(model_id=args.model_id, endpoint=args.endpoint)
+    provider = OllamaProvider(model_id=args.model_id, endpoint=args.endpoint, context_limit=args.context_limit)
     try:
         actual_provider_version = provider.server_version()
+        actual_model_digest = provider.model_digest()
+        provider.model_capabilities()
         identity = make_run_identity(
             system_version=args.system_version,
             model_id=args.model_id,
             endpoint=args.endpoint,
             provider_kind="ollama",
-            model_digest=args.model_digest,
+            model_digest=args.model_digest or actual_model_digest,
             provider_version=args.provider_version or actual_provider_version,
             context_limit=args.context_limit,
         )
