@@ -120,11 +120,11 @@ class LiveConfigurationPreflightTests(unittest.TestCase):
         provider = OllamaProvider(
             model_id="local-test",
             endpoint="http://127.0.0.1:11434",
-            context_limit=32768,
             transport=transport,
         )
+        provider.context_limit = 32768
         provider.complete(ModelRequest(request_id="ctx", prompt="return json"))
-        self.assertEqual(captured["options"]["num_ctx"], 32768)
+        self.assertEqual(captured["options"].get("num_ctx"), 32768)
 
     def test_r5_without_vision_is_valid_capability_failure_not_infrastructure(self):
         from alien_lab.computational_atlas_live_ledger import build_phase_c_ledger
