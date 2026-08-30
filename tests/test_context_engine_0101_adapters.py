@@ -17,7 +17,7 @@ def _task() -> ContextTask:
     docs = (
         ContextDocument(source_id="d1", text="amber turbine calibration token ZXQ-4917", version="V2"),
         ContextDocument(source_id="d2", text="amber turbine maintenance schedule", version="V2"),
-        ContextDocument(source_id="d3", text="unrelated inventory record", version="V2"),
+        ContextDocument(source_id="d3", text="unrelated inventory memo", version="V2"),
     )
     return ContextTask(
         task_id="task-a",
@@ -40,7 +40,7 @@ class ContextEngine0101AdapterTests(unittest.TestCase):
         request = serialize_retrieve_request(task, plane="normalized", max_candidates=32)
         encoded = json.dumps(request, sort_keys=True).lower()
         self.assertEqual(request["op"], "retrieve")
-        self.assertIn(task.question, encoded)
+        self.assertIn(task.question.lower(), encoded)
         for forbidden in ("expected_answer", "required_source_ids", "required_versions", "relevance", "oracle"):
             self.assertNotIn(forbidden, encoded)
         self.assertNotIn("zxq-4917\"", encoded.split("question", 1)[0])
