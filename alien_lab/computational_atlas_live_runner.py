@@ -131,6 +131,20 @@ def _deterministic_recognize(world: World, representation: str) -> UnboundTaskIR
     )
 
 
+def _perception_failure(*, model_calls: int, evidence_kind: str | None, error: str) -> dict[str, Any]:
+    return {
+        "status": "VALID_UNRESOLVED_PERCEPTION",
+        "score": 0,
+        "verified": False,
+        "result": None,
+        "model_calls": model_calls,
+        "error_kind": "UNSUPPORTED_MODALITY",
+        "error": error,
+        "unsupported_modality": True,
+        "evidence_kind": evidence_kind or "LIVE_MODEL_EVIDENCE",
+    }
+
+
 def _provider_direct_result(provider: ModelProvider, *, request_id: str, world: World, representation: str) -> dict[str, Any]:
     surface = render_live_surface(world, representation)
     prompt = DIRECT_SYSTEM_PROMPT + "\nINPUT:\n" + json.dumps({k: v for k, v in surface.items() if k != "image"}, sort_keys=True)
@@ -148,6 +162,12 @@ def _provider_direct_result(provider: ModelProvider, *, request_id: str, world: 
         max_output_tokens=2048,
     ))
     if not response.ok:
+        if representation == "R5_PERCEPTUAL" and response.error_kind == "UNSUPPORTED_MODALITY":
+            return _perception_failure(
+                model_calls=response.model_calls,
+                evidence_kind=response.evidence_kind,
+                error=response.error or "MODEL_MODALITY_UNSUPPORTED",
+            )
         status = "VALID_UNRESOLVED_SEMANTIC" if response.error_kind != "TRANSPORT" else "INVALID_INFRASTRUCTURE"
         return {
             "status": status,
@@ -188,15 +208,11 @@ def _unsupported_modality_outcome(base: dict[str, Any], provider: ModelProvider)
     evidence_kind = "FAKE_MECHANICS_ONLY" if str(getattr(provider, "provider_kind", "")) == "fake" else "LIVE_MODEL_EVIDENCE"
     return {
         **base,
-        "status": "VALID_UNRESOLVED_SEMANTIC",
-        "score": 0,
-        "verified": False,
-        "result": None,
-        "model_calls": 0,
-        "error_kind": "UNSUPPORTED_MODALITY",
-        "error": "MODEL_MODALITY_UNSUPPORTED",
-        "unsupported_modality": True,
-        "evidence_kind": evidence_kind,
+        **_perception_failure(
+            model_calls=0,
+            evidence_kind=evidence_kind,
+            error="MODEL_MODALITY_UNSUPPORTED",
+        ),
     }
 
 
@@ -254,6 +270,16 @@ def run_phase_c_cell(cell: Any, provider: ModelProvider | None) -> dict[str, Any
             images=_images_for_surface(surface),
         )
         if not response.ok or ir is None:
+            if cell.representation == "R5_PERCEPTUAL" and response.error_kind == "UNSUPPORTED_MODALITY":
+                return {
+                    **base,
+                    **_perception_failure(
+                        model_calls=response.model_calls,
+                        evidence_kind=response.evidence_kind,
+                        error=response.error or "MODEL_MODALITY_UNSUPPORTED",
+                    ),
+                    "semantic_errors": errors,
+                }
             status = "INVALID_INFRASTRUCTURE" if response.error_kind == "TRANSPORT" else "VALID_UNRESOLVED_SEMANTIC"
             return {**base, "status": status, "score": None if status == "INVALID_INFRASTRUCTURE" else 0, "verified": False, "result": None, "model_calls": response.model_calls, "semantic_errors": errors, "evidence_kind": response.evidence_kind}
         outcome = _execute_ir_against_world(world, ir)
@@ -310,22 +336,30 @@ def rescue_phase_c_outcome(original: dict[str, Any], world: World) -> dict[str, 
             applicable=False,
             note="Phase C operations have no Phase-F-style causal typed bindings; handoff is not separately identifiable.",
         ),
-        _rescue_stage("ORACLE_EXECUTION", oracle_execution, distinguishable=True),
-        _rescue_stage("VERIFIER_DISCRIMINATION", verifier, distinguishable=True),
+        _rescue_stage(
+            "ORACLE_EXECUTION",
+            oracle_execution,
+            distinguishable=False,
+            note="Phase C has no separately intervenable execution layer after oracle engine outputs; collapsed with ORACLE_ENGINE_OUTPUTS.",
+        ),
+        _rescue_stage(
+            "VERIFIER_DISCRIMINATION",
+            verifier,
+            distinguishable=False,
+            note="Phase C does not independently intervene on verifier behavior in this rescue path; no separate localization claim is made.",
+        ),
     ]
 
     localized = "MISSING_CAPABILITY"
-    if not world.outside_basis and original_snapshot.get("score") == 0:
+    if original_snapshot.get("status") == "VALID_UNRESOLVED_PERCEPTION":
+        localized = "PERCEPTION"
+    elif not world.outside_basis and original_snapshot.get("score") == 0:
         if oracle_ir.get("score") == 1:
             localized = "SEMANTIC"
         elif oracle_routing.get("score") == 1:
             localized = "ROUTING"
         elif oracle_outputs.get("score") == 1:
             localized = "ENGINE"
-        elif oracle_execution.get("score") == 1:
-            localized = "EXECUTION"
-        elif verifier.get("score") == 1:
-            localized = "VERIFICATION"
 
     return {
         "evidence_kind": "RESCUE_DIAGNOSTIC",
