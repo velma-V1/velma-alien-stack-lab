@@ -1,0 +1,61 @@
+name: Experiment 010.1 Context Engine Causal Attribution
+
+on:
+  push:
+    branches:
+      - experiment/010.1-context-engine-causal-attribution
+    paths:
+      - 'alien_lab/context_engine_*.py'
+      - 'tests/test_context_engine_0101_*.py'
+      - 'experiments/010.1-context-engine-causal-attribution/**'
+      - 'docs/superpowers/plans/2026-08-30-experiment-0101-context-engine-causal-attribution.md'
+      - '.github/workflows/0101-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  context-engine-0101:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deterministic fixture dependencies
+        run: python -m pip install 'Pillow==11.3.0'
+      - name: Compile Python sources
+        run: python -m compileall alien_lab tests
+      - name: Run 010.1 contract and adversarial tests
+        run: |
+          python -m unittest \
+            tests.test_context_engine_0101_contract \
+            tests.test_context_engine_0101_scoring \
+            tests.test_context_engine_0101_adapters \
+            tests.test_context_engine_0101_fusion \
+            tests.test_context_engine_0101_run_integrity \
+            tests.test_context_engine_0101_self_attack \
+            -v
+      - name: Run relevant Experiment 010 regressions
+        run: |
+          python -m unittest \
+            tests.test_computational_atlas \
+            tests.test_computational_atlas_claims \
+            tests.test_computational_atlas_live_cd_preflight \
+            tests.test_computational_atlas_live_config_preflight \
+            tests.test_computational_atlas_live_scientific_self_attack \
+            -v
+      - name: Run credential-free 010.1 fixture experiment
+        run: |
+          rm -rf /tmp/0101-context-engine-fixture
+          python -m alien_lab.context_engine_experiment \
+            --profile fixture \
+            --output-dir /tmp/0101-context-engine-fixture
+          cat /tmp/0101-context-engine-fixture/fixture-summary.json
+      - name: Upload 010.1 fixture evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-0101-fixture-evidence
+          path: |
+            /tmp/0101-context-engine-fixture/fixture-summary.json
+            /tmp/0101-context-engine-fixture/fixture-manifest.json
+          if-no-files-found: error
+          retention-days: 30
