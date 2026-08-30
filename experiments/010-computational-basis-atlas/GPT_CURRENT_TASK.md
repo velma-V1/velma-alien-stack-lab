@@ -2,9 +2,11 @@
 
 OWNER := user
 EXECUTOR := GPT
-KIMI := PRE_FIX_REVIEW_COMPLETE
+KIMI := PRE_FIX_REVIEW_ADJUDICATED
 CLAUDE := HOLD
-STATUS := RED_PHASE
+STATUS := READY_FOR_FINAL_KIMI_REVIEW
+READY_FOR_LIVE_C_D := NO
+G_H_I_RUNTIME_GATE := CLOSED
 
 OBJECTIVE:
     make Phase C/D capable of producing valid frozen-contract evidence
@@ -22,75 +24,102 @@ METHOD:
     shared GitHub branch := code truth
     prior Claude/Kimi findings := review inputs, never substitute for executable evidence
 
-REPRODUCED_BLOCKERS:
-    1. D repair can trigger on end-to-end verifier failure
-    2. free/constrained JSON reading is asymmetric
-    3. constrained D arm lacks structured-output capability gate
-    4. repair-call transport failure can become capability zero
-    5. provider identity is not cross-checked against sealed RunIdentity
-    6. fake/fixture run can receive completion-looking summary
-    7. deterministic recognizer copies sealed oracle metadata
-    8. outside-basis localization differs by arm/path
-    9. R5 renderer is a bit pattern, not readable glyph document
-    10. R5 leakage test does not validate rendered source content
-    11. legal TaskIR intent vocabulary is hidden protocol
-    12. semantic-formalization tax + arm/representation aggregation missing
-    13. Phase D frozen syntax/schema/semantic-executable/end-to-end diagnostics incomplete
-    14. rescue ladder is incomplete
-    15. automatic rescue evidence is not integrated into live persistence
+FROZEN_CONTRACT_PRESERVED:
+    C_CELLS := 3840
+    D_CELLS := 576
+    C_SEED := 20260910
+    D_SEED := 20260911
+    C_ARMS := unchanged
+    D_ARMS := unchanged
+    REPRESENTATIONS := unchanged
+    SCORING_MEMBERSHIP := unchanged
+    G_H_I_RUNTIME := disabled
+
+RESOLVED_BLOCKERS:
+    1. D repair no longer triggers merely because final verification is wrong
+    2. free/constrained JSON reading is arm-symmetric
+    3. constrained D requires declared structured-output support
+    4. repair-call transport failure is infrastructure score:null
+    5. runtime provider kind/model/endpoint/version/digest/context are checked against sealed RunIdentity
+    6. fake/fixture runs are explicitly non-live evidence
+    7. deterministic recognizer no longer copies sealed oracle verification/task metadata
+    8. outside-basis localization is consistent with MISSING_CAPABILITY contract
+    9. R5 is deterministic readable glyph-based PNG, not a bit barcode
+    10. leakage sweep checks rendered R5 source content as well as wrappers
+    11. legal TaskIR intent vocabulary is disclosed as interface syntax identically to semantic-interface arms
+    12. semantic-formalization tax plus arm/representation aggregation is implemented
+    13. Phase D emits syntax/schema/semantic-executable/end-to-end diagnostics
+    14. rescue preserves all frozen rung names while marking collapsed/not-applicable rungs honestly
+    15. rescue evidence is persisted separately from original evidence
+    16. sealed context_limit is enforced in Ollama requests via num_ctx
+    17. selected Ollama model digest is verified from provider state before scoring
+    18. Ollama model capabilities are checked before live scoring
+    19. R5 unsupported image modality is valid unresolved PERCEPTION, score 0
+    20. Ollama HTTP application-level image rejection is not retried/misclassified as transport outage
+    21. perception rescue localizes PERCEPTION without overwriting original score
+    22. Phase C does not fabricate separate ORACLE_EXECUTION / VERIFIER_DISCRIMINATION evidence when those interventions are not independently identifiable
 
 SCIENTIFIC_DECISIONS:
     R5 := CONTRACT_RESTORATION
     INTENT_VOCABULARY := CONTRACT_RESTORATION
     DETERMINISTIC_RECOGNIZER := KEEP_FROZEN_ARM + LIMIT_CLAIMS
-    REPORTING := MISSING_PREREGISTERED_INSTRUMENTATION
-    RESCUE := MISSING_PREREGISTERED_INSTRUMENTATION
+    REPORTING := MISSING_PREREGISTERED_INSTRUMENTATION_RESTORED
+    RESCUE := FROZEN_RUNG_STRUCTURE_RESTORED_WITH_COLLAPSE_DISCLOSURE
+    PERCEPTION := FROZEN_LOCALIZATION_LABEL_RESTORED
 
 REJECTED_CHANGES:
-    no performance-conditioned 40-cell live pilot
+    no performance-conditioned live pilot
     no new random/shuffled control arm in 010-v1
     no seed/task/arm/scoring changes
     no post-hoc phase dropping
+    no benchmark-specific production shortcut
 
 D_REPAIR_RULE:
     permit second call only when deterministic validation establishes
     syntactic/schema/semantic TaskIR invalidity or non-executability
     never because an otherwise valid executable TaskIR merely fails final verification
 
-QUEUE_RED:
-    write focused regression tests for each reproduced blocker
-    add test module to 010 CI
-    observe clean RED attributable only to missing/faulty behavior
+Q0_Q36_SELF_ATTACK_ADDITIONS:
+    runtime context must equal sealed context budget
+    runtime model digest/capabilities must be established before evidence
+    unsupported R5 modality is PERCEPTION rather than generic semantic/infrastructure failure
+    HTTP application errors must not masquerade as transport failures
+    rescue must not claim causal localization where intervention layers collapse
 
-QUEUE_GREEN:
-    fix minimal code per failing behavior
-    keep frozen C/D ledger/seeds/arms unchanged
-    implement readable deterministic R5 renderer
-    expose same legal intent vocabulary to all semantic-interface arms
-    implement explicit D diagnostics
-    implement paired live reporting
-    implement conservative full rescue ladder with explicit collapsed/not-applicable rungs
-    persist rescue separately from original evidence
-    harden provider identity + fixture labeling
+TDD_EVIDENCE:
+    RED_RUN_INITIAL := workflow #79, 108 tests, 10 failures + 2 errors
+    RED_RUN_AFTER_IDENTITY_FIXES := workflow #81, 108 tests, 7 failures
+    GREEN_CODE_HEAD := 4663fd54a77e023a74e346bce0c17a51e2fe1c14
+    GREEN_RUN := workflow #83
+    GREEN_TESTS := 108/108 OK
 
-QUEUE_VERIFY:
-    targeted tests
-    010 regression set
-    deterministic smoke/full atlas
-    leakage sweep all 192 × R1-R5 including R5 source text
-    Q0-Q36 self-attack
+DETERMINISTIC_VERIFICATION_AT_GREEN_CODE_HEAD:
+    smoke.expected_cells := 324
+    smoke.invalid_cells := 0
+    smoke.ledger_hash := 8d34d04edbc79627f1c958a4b0836e1f4d315ef462a9f738ffd613f2a80baf0c
+    full.expected_cells := 18112
+    full.terminal_cells := 18112
+    full.invalid_cells := 0
+    full.verified_successes := 6104
+    full.valid_unresolved := 12008
+    full.model_calls := 0
+    full.ledger_hash := 8b549d60d652f6d435ac1d2bc2631b00c01c454ca2522830f4a47b9ad74b8878
+    full.replay_fingerprint := cda5d1ec6bec048c4cce0625ff3553b264f7f668ce607db70378f98f5df750ff
 
-DONE_WHEN:
-    every reproduced defect has RED/GREEN evidence
-    C/D preregistered metrics are computable
-    rescue evidence is automatic, separate, and cannot overwrite original scores
-    R5 is readable and leakage-tested
-    frozen C/D counts/seeds/arms unchanged
-    G/H/I boundary remains closed
-    relevant CI/regressions green
-    STATUS := READY_FOR_FINAL_KIMI_REVIEW
+INTERPRETATION_LIMITS:
+    C/D does not prove real-world semantic generalization
+    deterministic recognizer does not prove general non-neural semantic recognition
+    C/D does not prove frontier superiority
+    C/D does not prove V31M4 production superiority
+    C/D does not prove true multi-engine causal synergy; Phase F is required
+    collapsed rescue rungs cannot support separate localization claims
 
-NEXT:
-    Kimi website performs one narrow post-fix read-only review
-    GPT reproduces/refutes only new material findings
+NEXT_GATE:
+    Kimi website performs one narrow POST-FIX read-only review using KIMI_REVIEW_TASK.md
+    GPT reproduces/refutes only NEW material findings
     Claude remains unused unless a high-impact ambiguity survives executable discrimination
+
+DO_NOT_RUN_LIVE_C_D_UNTIL:
+    final Kimi review is returned
+    GPT adjudicates every material post-fix finding
+    READY_FOR_LIVE_C_D is explicitly changed to YES
