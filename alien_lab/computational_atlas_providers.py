@@ -15,6 +15,8 @@ class ModelProvider(Protocol):
     endpoint: str
     provider_kind: str
     supports_structured_output: bool
+    supports_images: bool | None
+    context_limit: int | None
     transport_retries_total: int
 
     def complete(self, request: ModelRequest) -> ModelResponse: ...
@@ -48,6 +50,8 @@ def seal_run_identity(identity: RunIdentity) -> str:
 class FakeProvider:
     provider_kind = "fake"
     supports_structured_output = True
+    supports_images = True
+    context_limit = None
 
     def __init__(self, model_id: str, scripted: list[Any]):
         self.model_id = model_id
@@ -78,6 +82,8 @@ class FakeProvider:
 class _HTTPProviderBase:
     provider_kind = "http"
     supports_structured_output = False
+    supports_images: bool | None = None
+    context_limit: int | None = None
 
     def __init__(self, *, model_id: str, endpoint: str, timeout: float = 180.0, transport: Callable[[urllib.request.Request, float], bytes] | None = None):
         self.model_id = model_id
@@ -99,6 +105,21 @@ class _HTTPProviderBase:
                 raw = self._transport(request, self.timeout)
                 elapsed = (time.perf_counter() - start) * 1000.0
                 return json.loads(raw.decode("utf-8")), None, elapsed, attempt
+            except urllib.error.HTTPError as exc:
+                elapsed = (time.perf_counter() - start) * 1000.0
+                try:
+                    raw_error = exc.read()
+                except Exception:
+                    raw_error = b""
+                try:
+                    parsed_error = json.loads(raw_error.decode("utf-8")) if raw_error else {}
+                except Exception:
+                    parsed_error = {}
+                error_text = str(parsed_error.get("error") or f"HTTP {exc.code}: {exc.reason}")
+                return {
+                    "__http_status__": int(exc.code),
+                    "__http_error__": error_text,
+                }, None, elapsed, attempt
             except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 if attempt >= 2:
@@ -138,10 +159,16 @@ class OllamaProvider(_HTTPProviderBase):
     def default_path() -> str:
         return "/api/chat"
 
+    @staticmethod
+    def _raise_http_metadata(data: dict[str, Any], prefix: str) -> None:
+        if "__http_status__" in data:
+            raise ValueError(f"{prefix}:{data.get('__http_status__')}:{data.get('__http_error__')}")
+
     def server_version(self) -> str:
         data, transport_error, _, _ = self._get("/api/version", {"Accept": "application/json"})
         if data is None:
             raise ValueError(f"PROVIDER_VERSION_UNAVAILABLE:{transport_error}")
+        self._raise_http_metadata(data, "PROVIDER_VERSION_UNAVAILABLE")
         version = str(data.get("version") or "").strip()
         if not version:
             raise ValueError("PROVIDER_VERSION_UNAVAILABLE:missing_version")
@@ -153,6 +180,7 @@ class OllamaProvider(_HTTPProviderBase):
         data, transport_error, _, _ = self._get("/api/tags", {"Accept": "application/json"})
         if data is None:
             raise ValueError(f"MODEL_DIGEST_UNAVAILABLE:{transport_error}")
+        self._raise_http_metadata(data, "MODEL_DIGEST_UNAVAILABLE")
         requested = self.model_id
         aliases = {requested}
         if ":" not in requested:
@@ -180,6 +208,7 @@ class OllamaProvider(_HTTPProviderBase):
         )
         if data is None:
             raise ValueError(f"MODEL_CAPABILITIES_UNAVAILABLE:{transport_error}")
+        self._raise_http_metadata(data, "MODEL_CAPABILITIES_UNAVAILABLE")
         capabilities = tuple(str(item) for item in (data.get("capabilities") or []) if isinstance(item, str))
         self._cached_capabilities = capabilities
         self.supports_images = "vision" in capabilities
@@ -206,6 +235,21 @@ class OllamaProvider(_HTTPProviderBase):
         self.transport_retries_total += retries
         if data is None:
             return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error, transport_retries=retries)
+        if "__http_status__" in data:
+            error_text = str(data.get("__http_error__") or f"HTTP {data.get('__http_status__')}")
+            lowered = error_text.lower()
+            modality_markers = ("image", "vision", "multimodal", "modality")
+            error_kind = "UNSUPPORTED_MODALITY" if request.images and any(marker in lowered for marker in modality_markers) else "PROVIDER_ERROR"
+            return ModelResponse(
+                ok=False,
+                text="",
+                model_calls=1,
+                duration_ms=elapsed,
+                error_kind=error_kind,
+                error=error_text,
+                transport_retries=retries,
+                raw=data,
+            )
         message_data = data.get("message") or {}
         text = str(message_data.get("content") or "")
         parsed = None
@@ -220,6 +264,8 @@ class OllamaProvider(_HTTPProviderBase):
 class AnthropicMessagesProvider(_HTTPProviderBase):
     provider_kind = "anthropic"
     supports_structured_output = False
+    supports_images = True
+    context_limit = None
 
     def __init__(self, *, model_id: str, endpoint: str = "https://api.anthropic.com", api_key: str, anthropic_version: str = "2023-06-01", timeout: float = 180.0, transport: Callable[[urllib.request.Request, float], bytes] | None = None):
         super().__init__(model_id=model_id, endpoint=endpoint, timeout=timeout, transport=transport)
@@ -252,6 +298,17 @@ class AnthropicMessagesProvider(_HTTPProviderBase):
         self.transport_retries_total += retries
         if data is None:
             return ModelResponse(ok=False, text="", model_calls=1, duration_ms=elapsed, error_kind="TRANSPORT", error=transport_error, transport_retries=retries)
+        if "__http_status__" in data:
+            return ModelResponse(
+                ok=False,
+                text="",
+                model_calls=1,
+                duration_ms=elapsed,
+                error_kind="PROVIDER_ERROR",
+                error=str(data.get("__http_error__") or f"HTTP {data.get('__http_status__')}"),
+                transport_retries=retries,
+                raw=data,
+            )
         stop_reason = data.get("stop_reason")
         blocks = data.get("content") or []
         text = "\n".join(str(block.get("text", "")) for block in blocks if block.get("type") == "text").strip()
