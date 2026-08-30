@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .computational_atlas_live_ledger import build_phase_c_ledger, build_phase_d_ledger
-from .computational_atlas_live_runner import run_phase_c_cell, run_phase_d_cell
+from .computational_atlas_live_runner import rescue_phase_c_outcome, run_phase_c_cell, run_phase_d_cell
 from .computational_atlas_live_types import LiveCell, RunIdentity
 from .computational_atlas_providers import ModelProvider, OllamaProvider, seal_run_identity
 from .computational_atlas_semantics import DIRECT_SYSTEM_PROMPT, SEMANTIC_SYSTEM_PROMPT
 from .computational_atlas_surfaces import task_ir_json_schema
 from .computational_atlas_types import stable_hash
+from .computational_atlas_worlds import build_worlds
 
 
 EXPERIMENT = "010-computational-basis-atlas"
@@ -55,7 +56,7 @@ def live_prompt_contract_hash() -> str:
         "direct_system_prompt": DIRECT_SYSTEM_PROMPT,
         "semantic_system_prompt": SEMANTIC_SYSTEM_PROMPT,
         "task_ir_schema": task_ir_json_schema(),
-        "surface_contract": "experiment-010-live-surfaces-v1",
+        "surface_contract": "experiment-010-live-surfaces-v2-readable-r5-explicit-intents",
         "max_output_tokens": 2048,
         "enabled_phases": list(_SUPPORTED_LIVE_PHASES),
     })
@@ -108,6 +109,26 @@ def _atomic_json(path: Path, payload: Any) -> None:
 
 def _ledger_payload(cells: list[LiveCell]) -> list[dict[str, Any]]:
     return [cell.to_dict() for cell in cells]
+
+
+def _normalized_endpoint(value: str) -> str:
+    return str(value).rstrip("/")
+
+
+def _validate_provider_identity(provider: ModelProvider | None, identity: RunIdentity) -> None:
+    if provider is None:
+        return
+    provider_kind = str(getattr(provider, "provider_kind", ""))
+    model_id = str(getattr(provider, "model_id", ""))
+    endpoint = _normalized_endpoint(str(getattr(provider, "endpoint", "")))
+    expected = (
+        str(identity.provider_kind),
+        str(identity.model_id),
+        _normalized_endpoint(identity.endpoint),
+    )
+    observed = (provider_kind, model_id, endpoint)
+    if observed != expected:
+        raise ValueError(f"PROVIDER_IDENTITY_MISMATCH:expected={expected}:observed={observed}")
 
 
 def prepare_live_run(output_dir: Path, identity: RunIdentity, cells: list[LiveCell]) -> dict[str, Any]:
@@ -166,6 +187,99 @@ def _load_envelope(path: Path, *, identity_hash: str, cell: LiveCell) -> dict[st
     return envelope
 
 
+def _load_rescue_envelope(
+    path: Path,
+    *,
+    identity_hash: str,
+    cell: LiveCell,
+    original_sha256: str,
+) -> dict[str, Any]:
+    envelope = json.loads(path.read_text(encoding="utf-8"))
+    if stable_hash(envelope.get("payload")) != envelope.get("sha256"):
+        raise ValueError(f"LIVE_RESCUE_HASH_MISMATCH:{path.stem}")
+    payload = envelope.get("payload") or {}
+    if payload.get("run_identity_hash") != identity_hash:
+        raise ValueError(f"LIVE_RESCUE_IDENTITY_MISMATCH:{path.stem}")
+    if payload.get("cell") != cell.to_dict():
+        raise ValueError(f"LIVE_RESCUE_CELL_MISMATCH:{path.stem}")
+    if payload.get("original_evidence_sha256") != original_sha256:
+        raise ValueError(f"LIVE_RESCUE_ORIGINAL_MISMATCH:{path.stem}")
+    return envelope
+
+
+def _aggregate_group(items: list[dict[str, Any]], field: str) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        cell = item["payload"]["cell"]
+        key = str(cell.get(field) or "NONE")
+        grouped.setdefault(key, []).append(item)
+    result: dict[str, dict[str, Any]] = {}
+    for key, group in grouped.items():
+        valid = [entry for entry in group if entry["payload"]["outcome"].get("score") is not None]
+        verified = sum(1 for entry in valid if entry["payload"]["outcome"].get("score") == 1)
+        result[key] = {
+            "terminal_cells": len(group),
+            "valid_cells": len(valid),
+            "invalid_cells": len(group) - len(valid),
+            "verified_successes": verified,
+            "valid_unresolved": len(valid) - verified,
+            "verified_success_rate": (verified / len(valid)) if valid else None,
+        }
+    return result
+
+
+def _semantic_formalization_tax(items: list[dict[str, Any]]) -> dict[str, Any]:
+    paired: dict[tuple[int, str], dict[str, int | None]] = {}
+    for item in items:
+        cell = item["payload"]["cell"]
+        if cell.get("phase") != "C":
+            continue
+        world_index = cell.get("world_index")
+        representation = cell.get("representation")
+        arm = cell.get("arm")
+        if not isinstance(world_index, int) or world_index >= 184 or not isinstance(representation, str):
+            continue
+        if arm not in {"ORACLE_IR_BASIS", "LOCAL_SEMANTIC_COMPILER_BASIS"}:
+            continue
+        score = item["payload"]["outcome"].get("score")
+        paired.setdefault((world_index, representation), {})[str(arm)] = score
+
+    taxes: list[float] = []
+    by_representation: dict[str, list[float]] = {}
+    for (_, representation), values in paired.items():
+        if "ORACLE_IR_BASIS" not in values or "LOCAL_SEMANTIC_COMPILER_BASIS" not in values:
+            continue
+        oracle_score = values["ORACLE_IR_BASIS"]
+        local_score = values["LOCAL_SEMANTIC_COMPILER_BASIS"]
+        if oracle_score is None or local_score is None:
+            continue
+        tax = float(oracle_score - local_score)
+        taxes.append(tax)
+        by_representation.setdefault(representation, []).append(tax)
+
+    return {
+        "paired_cells": len(taxes),
+        "mean_tax": (sum(taxes) / len(taxes)) if taxes else None,
+        "by_representation": {
+            representation: {
+                "paired_cells": len(values),
+                "mean_tax": sum(values) / len(values),
+            }
+            for representation, values in sorted(by_representation.items())
+        },
+        "rescued_scores_substituted": False,
+    }
+
+
+def _needs_automatic_c_rescue(cell: LiveCell, outcome: dict[str, Any]) -> bool:
+    return (
+        cell.phase == "C"
+        and cell.arm == "LOCAL_SEMANTIC_COMPILER_BASIS"
+        and outcome.get("score") == 0
+        and str(outcome.get("status") or "").startswith("VALID_")
+    )
+
+
 def run_live_cells(
     *,
     cells: list[LiveCell],
@@ -175,9 +289,13 @@ def run_live_cells(
     rerun_invalid: bool = False,
 ) -> dict[str, Any]:
     output_dir = Path(output_dir)
+    _validate_provider_identity(provider, identity)
     manifest = prepare_live_run(output_dir, identity, cells)
     evidence: list[dict[str, Any]] = []
+    rescues: list[dict[str, Any]] = []
     identity_hash = str(manifest["run_identity_hash"])
+    phase_c_worlds: list[Any] | None = None
+
     for cell in cells:
         path = output_dir / "cells" / f"{cell.cell_id}.json"
         envelope: dict[str, Any] | None = None
@@ -201,6 +319,32 @@ def run_live_cells(
             _atomic_json(path, envelope)
         evidence.append(envelope)
 
+        outcome = envelope["payload"]["outcome"]
+        if _needs_automatic_c_rescue(cell, outcome):
+            if phase_c_worlds is None:
+                phase_c_worlds = build_worlds(seed=20260910, count=192)
+            world = phase_c_worlds[int(cell.world_index)]
+            rescue_path = output_dir / "rescues" / f"{cell.cell_id}.json"
+            rescue_envelope: dict[str, Any]
+            if rescue_path.exists():
+                rescue_envelope = _load_rescue_envelope(
+                    rescue_path,
+                    identity_hash=identity_hash,
+                    cell=cell,
+                    original_sha256=str(envelope["sha256"]),
+                )
+            else:
+                rescue = rescue_phase_c_outcome(outcome, world)
+                rescue_payload = {
+                    "run_identity_hash": identity_hash,
+                    "cell": cell.to_dict(),
+                    "original_evidence_sha256": envelope["sha256"],
+                    "rescue": rescue,
+                }
+                rescue_envelope = {"payload": rescue_payload, "sha256": stable_hash(rescue_payload)}
+                _atomic_json(rescue_path, rescue_envelope)
+            rescues.append(rescue_envelope)
+
     terminal = len(evidence)
     invalid = sum(1 for item in evidence if item["payload"]["outcome"].get("score") is None)
     verified = sum(1 for item in evidence if item["payload"]["outcome"].get("score") == 1)
@@ -211,6 +355,15 @@ def run_live_cells(
     for item in evidence:
         kind = str(item["payload"]["outcome"].get("evidence_kind") or "UNSPECIFIED")
         evidence_kinds[kind] = evidence_kinds.get(kind, 0) + 1
+
+    fixture_run = identity.provider_kind == "fake" or evidence_kinds.get("FAKE_MECHANICS_ONLY", 0) > 0
+    if fixture_run:
+        conclusion = "NON_LIVE_FIXTURE_RUN"
+    elif terminal == len(cells) and invalid == 0:
+        conclusion = "DISCOVERY_COMPLETE"
+    else:
+        conclusion = "PARTIAL_INVALID_EVIDENCE"
+
     summary = {
         "experiment": EXPERIMENT,
         "profile": identity.profile,
@@ -225,7 +378,12 @@ def run_live_cells(
         "ledger_hash": manifest["ledger_hash"],
         "run_identity_hash": identity_hash,
         "evidence_kinds": evidence_kinds,
-        "conclusion": "DISCOVERY_COMPLETE" if terminal == len(cells) and invalid == 0 else "PARTIAL_INVALID_EVIDENCE",
+        "live_model_evidence": bool(not fixture_run and evidence_kinds.get("LIVE_MODEL_EVIDENCE", 0) > 0),
+        "rescue_cells": len(rescues),
+        "by_arm": _aggregate_group(evidence, "arm"),
+        "by_representation": _aggregate_group(evidence, "representation"),
+        "semantic_formalization_tax": _semantic_formalization_tax(evidence),
+        "conclusion": conclusion,
     }
     _atomic_json(output_dir / "live-summary.json", summary)
     return summary
