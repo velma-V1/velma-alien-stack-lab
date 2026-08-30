@@ -27,6 +27,7 @@ class LiveScientificSelfAttackTests(unittest.TestCase):
                 "task_specific_tuning": False,
             },
             prompt_contract_hash="scientific-self-attack",
+            model_digest="digest-a",
             provider_version="0.12.6",
         )
 
@@ -87,11 +88,18 @@ class LiveScientificSelfAttackTests(unittest.TestCase):
             model_id = "local-test"
             endpoint = "http://127.0.0.1:11434"
             supports_structured_output = True
+            supports_images = True
             transport_retries_total = 0
             context_limit = 4096
 
             def server_version(self):
                 return "0.12.6"
+
+            def model_digest(self):
+                return "digest-a"
+
+            def model_capabilities(self):
+                return ("completion", "vision")
 
             def complete(self, request):  # pragma: no cover
                 raise AssertionError(f"unexpected model call: {request.request_id}")
