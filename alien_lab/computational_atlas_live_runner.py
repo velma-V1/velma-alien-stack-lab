@@ -184,6 +184,22 @@ def _provider_direct_result(provider: ModelProvider, *, request_id: str, world: 
     return scored
 
 
+def _unsupported_modality_outcome(base: dict[str, Any], provider: ModelProvider) -> dict[str, Any]:
+    evidence_kind = "FAKE_MECHANICS_ONLY" if str(getattr(provider, "provider_kind", "")) == "fake" else "LIVE_MODEL_EVIDENCE"
+    return {
+        **base,
+        "status": "VALID_UNRESOLVED_SEMANTIC",
+        "score": 0,
+        "verified": False,
+        "result": None,
+        "model_calls": 0,
+        "error_kind": "UNSUPPORTED_MODALITY",
+        "error": "MODEL_MODALITY_UNSUPPORTED",
+        "unsupported_modality": True,
+        "evidence_kind": evidence_kind,
+    }
+
+
 def run_phase_c_cell(cell: Any, provider: ModelProvider | None) -> dict[str, Any]:
     world = build_worlds(seed=20260910, count=192)[int(cell.world_index)]
     base = {"cell_id": cell.cell_id, "phase": "C", "arm": cell.arm, "world_id": world.world_id, "representation": cell.representation}
@@ -211,10 +227,14 @@ def run_phase_c_cell(cell: Any, provider: ModelProvider | None) -> dict[str, Any
     if cell.arm == "MODEL_DIRECT":
         if provider is None:
             return {**base, "status": "INVALID_INFRASTRUCTURE", "score": None, "verified": False, "result": None, "model_calls": 0, "error": "MODEL_PROVIDER_REQUIRED"}
+        if cell.representation == "R5_PERCEPTUAL" and getattr(provider, "supports_images", None) is False:
+            return _unsupported_modality_outcome(base, provider)
         return {**base, **_provider_direct_result(provider, request_id=cell.cell_id, world=world, representation=str(cell.representation))}
     if cell.arm == "LOCAL_SEMANTIC_COMPILER_BASIS":
         if provider is None:
             return {**base, "status": "INVALID_INFRASTRUCTURE", "score": None, "verified": False, "result": None, "model_calls": 0, "error": "MODEL_PROVIDER_REQUIRED"}
+        if cell.representation == "R5_PERCEPTUAL" and getattr(provider, "supports_images", None) is False:
+            return _unsupported_modality_outcome(base, provider)
         if not bool(getattr(provider, "supports_structured_output", False)):
             return {
                 **base,
