@@ -34,6 +34,7 @@ jobs:
             tests.test_context_engine_0101_run_integrity \
             tests.test_context_engine_0101_live \
             tests.test_context_engine_0101_protocol \
+            tests.test_context_engine_0101_runner \
             tests.test_context_engine_0101_self_attack \
             -v
       - name: Run relevant Experiment 010 regressions
