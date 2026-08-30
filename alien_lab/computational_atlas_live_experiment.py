@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +21,7 @@ from .computational_atlas_worlds import build_worlds
 EXPERIMENT = "010-computational-basis-atlas"
 LIVE_PROFILE = "live-cd-v1"
 _SUPPORTED_LIVE_PHASES = ("C", "D")
+_MIN_OLLAMA_STRUCTURED_OUTPUT_VERSION = (0, 5, 0)
 
 
 def supported_live_phases() -> tuple[str, ...]:
@@ -115,6 +117,18 @@ def _normalized_endpoint(value: str) -> str:
     return str(value).rstrip("/")
 
 
+def _normalized_version(value: str) -> str:
+    return str(value).strip().lstrip("vV")
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    normalized = _normalized_version(value)
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", normalized)
+    if match is None:
+        raise ValueError(f"PROVIDER_VERSION_INVALID:{value}")
+    return tuple(int(part) for part in match.groups())
+
+
 def _validate_provider_identity(provider: ModelProvider | None, identity: RunIdentity) -> None:
     if provider is None:
         return
@@ -129,6 +143,34 @@ def _validate_provider_identity(provider: ModelProvider | None, identity: RunIde
     observed = (provider_kind, model_id, endpoint)
     if observed != expected:
         raise ValueError(f"PROVIDER_IDENTITY_MISMATCH:expected={expected}:observed={observed}")
+
+    if provider_kind == "fake":
+        return
+
+    context_limit = identity.generation_contract.get("context_limit")
+    if not isinstance(context_limit, int) or isinstance(context_limit, bool) or context_limit <= 0:
+        raise ValueError("LIVE_CONTEXT_LIMIT_REQUIRED")
+
+    sealed_provider_version = str(identity.provider_version or "").strip()
+    if not sealed_provider_version:
+        raise ValueError("LIVE_PROVIDER_VERSION_REQUIRED")
+
+    if provider_kind == "ollama":
+        version_reader = getattr(provider, "server_version", None)
+        if not callable(version_reader):
+            raise ValueError("PROVIDER_VERSION_UNAVAILABLE")
+        actual_provider_version = str(version_reader()).strip()
+        if _normalized_version(actual_provider_version) != _normalized_version(sealed_provider_version):
+            raise ValueError(
+                f"PROVIDER_VERSION_MISMATCH:sealed={sealed_provider_version}:actual={actual_provider_version}"
+            )
+        if _version_tuple(actual_provider_version) < _MIN_OLLAMA_STRUCTURED_OUTPUT_VERSION:
+            raise ValueError(
+                "STRUCTURED_OUTPUT_VERSION_UNSUPPORTED:"
+                f"actual={actual_provider_version}:minimum=0.5.0"
+            )
+        if not bool(getattr(provider, "supports_structured_output", False)):
+            raise ValueError("STRUCTURED_OUTPUT_UNSUPPORTED")
 
 
 def prepare_live_run(output_dir: Path, identity: RunIdentity, cells: list[LiveCell]) -> dict[str, Any]:
@@ -408,24 +450,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--system-version", required=True)
     parser.add_argument("--model-digest")
-    parser.add_argument("--provider-version")
-    parser.add_argument("--context-limit", type=int)
+    parser.add_argument("--provider-version", help="Optional asserted Ollama server version; actual /api/version must match.")
+    parser.add_argument("--context-limit", type=int, required=True)
     parser.add_argument("--phases", choices=("C", "D", "CD"), default="CD")
     parser.add_argument("--rerun-invalid", action="store_true")
     args = parser.parse_args(argv)
 
     phases = ("C", "D") if args.phases == "CD" else (args.phases,)
-    identity = make_run_identity(
-        system_version=args.system_version,
-        model_id=args.model_id,
-        endpoint=args.endpoint,
-        provider_kind="ollama",
-        model_digest=args.model_digest,
-        provider_version=args.provider_version,
-        context_limit=args.context_limit,
-    )
     provider = OllamaProvider(model_id=args.model_id, endpoint=args.endpoint)
     try:
+        actual_provider_version = provider.server_version()
+        identity = make_run_identity(
+            system_version=args.system_version,
+            model_id=args.model_id,
+            endpoint=args.endpoint,
+            provider_kind="ollama",
+            model_digest=args.model_digest,
+            provider_version=args.provider_version or actual_provider_version,
+            context_limit=args.context_limit,
+        )
         summary = run_cd_experiment(
             provider=provider,
             output_dir=Path(args.output_dir),
