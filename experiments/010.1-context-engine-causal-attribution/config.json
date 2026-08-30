@@ -1,0 +1,23 @@
+{
+  "experiment": "010.1-context-engine-causal-attribution",
+  "preregistration": "experiments/010.1-context-engine-causal-attribution/PREREGISTRATION-v1.md",
+  "corpus_seed": 20261001,
+  "answer_context_utf8_bytes": 16384,
+  "answer_max_output_tokens": 512,
+  "primary_answer_model_target": "qwen3.5:9b-q8_0",
+  "primary_context_limit_target": 25600,
+  "rrf_k": 60,
+  "advanced_systems": {
+    "RAGFLOW_FULL": {"upstream": "infiniflow/ragflow", "pin": "v0.27.1"},
+    "PAGEINDEX_TREE": {"upstream": "VectifyAI/PageIndex", "pin": "9fee239b174fcc205fec28df105e519ac7171522"},
+    "MICROSOFT_GRAPHRAG": {"upstream": "microsoft/graphrag", "pin": "v3.1.2"},
+    "COLBERT_LATE_INTERACTION": {"upstream": "stanford-futuredata/ColBERT", "pin": "cc4f3dc91c0b45d2d08c251d9d95178285c65f1c"},
+    "HIPPORAG_PPR": {"upstream": "OSU-NLP-Group/HippoRAG", "pin": "2f52a86dd04e4633703bd2fb3bb6a37683ac3cfb"},
+    "SERVIETTE_LIVE_RAG": {"upstream": "pathwaycom/serviette", "pin": "800c874621c22dcdb9c29cf20bcd5205551800eb"}
+  },
+  "live_execution": {
+    "parent_terminal_cells_required": 4416,
+    "unlock_receipt_required": true,
+    "enabled": false
+  }
+}
