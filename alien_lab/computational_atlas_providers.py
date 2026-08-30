@@ -119,6 +119,21 @@ class OllamaProvider(_HTTPProviderBase):
     provider_kind = "ollama"
     supports_structured_output = True
 
+    def __init__(
+        self,
+        *,
+        model_id: str,
+        endpoint: str,
+        context_limit: int | None = None,
+        timeout: float = 180.0,
+        transport: Callable[[urllib.request.Request, float], bytes] | None = None,
+    ):
+        super().__init__(model_id=model_id, endpoint=endpoint, timeout=timeout, transport=transport)
+        self.context_limit = context_limit
+        self.supports_images: bool | None = None
+        self._cached_model_digest: str | None = None
+        self._cached_capabilities: tuple[str, ...] | None = None
+
     @staticmethod
     def default_path() -> str:
         return "/api/chat"
@@ -132,15 +147,56 @@ class OllamaProvider(_HTTPProviderBase):
             raise ValueError("PROVIDER_VERSION_UNAVAILABLE:missing_version")
         return version
 
+    def model_digest(self) -> str:
+        if self._cached_model_digest:
+            return self._cached_model_digest
+        data, transport_error, _, _ = self._get("/api/tags", {"Accept": "application/json"})
+        if data is None:
+            raise ValueError(f"MODEL_DIGEST_UNAVAILABLE:{transport_error}")
+        requested = self.model_id
+        aliases = {requested}
+        if ":" not in requested:
+            aliases.add(requested + ":latest")
+        for item in data.get("models") or []:
+            if not isinstance(item, dict):
+                continue
+            names = {str(item.get("name") or ""), str(item.get("model") or "")}
+            if aliases.isdisjoint(names):
+                continue
+            digest = str(item.get("digest") or "").strip()
+            if not digest:
+                raise ValueError("MODEL_DIGEST_UNAVAILABLE:missing_digest")
+            self._cached_model_digest = digest
+            return digest
+        raise ValueError(f"MODEL_DIGEST_UNAVAILABLE:model_not_found:{self.model_id}")
+
+    def model_capabilities(self) -> tuple[str, ...]:
+        if self._cached_capabilities is not None:
+            return self._cached_capabilities
+        data, transport_error, _, _ = self._post(
+            "/api/show",
+            {"model": self.model_id},
+            {"Content-Type": "application/json"},
+        )
+        if data is None:
+            raise ValueError(f"MODEL_CAPABILITIES_UNAVAILABLE:{transport_error}")
+        capabilities = tuple(str(item) for item in (data.get("capabilities") or []) if isinstance(item, str))
+        self._cached_capabilities = capabilities
+        self.supports_images = "vision" in capabilities
+        return capabilities
+
     def complete(self, request: ModelRequest) -> ModelResponse:
         message: dict[str, Any] = {"role": "user", "content": request.prompt}
         if request.images:
             message["images"] = [image.base64_data for image in request.images]
+        options: dict[str, Any] = {"num_predict": request.max_output_tokens}
+        if self.context_limit is not None:
+            options["num_ctx"] = int(self.context_limit)
         payload: dict[str, Any] = {
             "model": self.model_id,
             "messages": [message],
             "stream": False,
-            "options": {"num_predict": request.max_output_tokens},
+            "options": options,
         }
         if request.json_schema is not None:
             payload["format"] = request.json_schema
