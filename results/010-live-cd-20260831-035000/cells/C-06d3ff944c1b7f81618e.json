@@ -1,0 +1,37 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "LOCAL_SEMANTIC_COMPILER_BASIS",
+      "cell_id": "C-06d3ff944c1b7f81618e",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 110,
+      "phase": "C",
+      "representation": "R3_PARAPHRASED",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 5
+    },
+    "outcome": {
+      "arm": "LOCAL_SEMANTIC_COMPILER_BASIS",
+      "cell_id": "C-06d3ff944c1b7f81618e",
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "phase": "C",
+      "representation": "R3_PARAPHRASED",
+      "result": null,
+      "score": 0,
+      "semantic_errors": [
+        "MALFORMED_OUTPUT"
+      ],
+      "status": "VALID_UNRESOLVED_SEMANTIC",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W005-6ae0827a"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "4d04afa712686e7cd4f8645f0c0f29937809de7b25d4be4f207ff57e71b8a009"
+}

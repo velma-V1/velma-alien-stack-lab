@@ -1,0 +1,39 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-ae2aa78567c6bb91cdd1",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 3736,
+      "phase": "C",
+      "representation": "R5_PERCEPTUAL",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 186
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-ae2aa78567c6bb91cdd1",
+      "duration_ms": 18277.50600001309,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 63,
+      "phase": "C",
+      "prompt_tokens": 952,
+      "representation": "R5_PERCEPTUAL",
+      "result": [
+        "CASE W186-c4ca7a93\n1. Resolve this unfamiliar problem from observations: {'opaque_problem': 'outside-2046', 'observations': [4, 5, 7]}."
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W186-c4ca7a93"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "2014ece7871f42654aa064787389d9bcb9bba95d4deb2f051a4c4edead350a21"
+}

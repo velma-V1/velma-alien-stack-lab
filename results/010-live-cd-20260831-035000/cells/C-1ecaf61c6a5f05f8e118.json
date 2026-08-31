@@ -1,0 +1,36 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-1ecaf61c6a5f05f8e118",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 1692,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 84
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-1ecaf61c6a5f05f8e118",
+      "error": "Expecting value: line 1 column 1 (char 0)",
+      "error_kind": "MALFORMED_OUTPUT",
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "result": null,
+      "score": 0,
+      "status": "VALID_UNRESOLVED_SEMANTIC",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W084-8e6fdf99"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "748489979270fc5929a68049706e0293f454a2923b2756232011fcf29f154630"
+}

@@ -1,0 +1,41 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "ORACLE_IR_BASIS",
+      "cell_id": "C-b56bc1b9373e594d2a88",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 1111,
+      "phase": "C",
+      "representation": "R3_PARAPHRASED",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 55
+    },
+    "outcome": {
+      "arm": "ORACLE_IR_BASIS",
+      "cell_id": "C-b56bc1b9373e594d2a88",
+      "errors": [],
+      "evidence_kind": "ORACLE_DOWNSTREAM_CEILING",
+      "model_calls": 0,
+      "phase": "C",
+      "representation": "R3_PARAPHRASED",
+      "result": [
+        [
+          "s6050",
+          "s6051",
+          "s605g"
+        ]
+      ],
+      "score": 1,
+      "status": "VERIFIED_SUCCESS",
+      "transport_retries": 0,
+      "verified": true,
+      "world_id": "W055-466446c0"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "44f046856390db4f9396a7aedb30dbe888984c4501904d95886e18439dd4115a"
+}

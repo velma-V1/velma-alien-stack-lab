@@ -1,0 +1,39 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-ee8838e0fda2d97fe8a6",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 756,
+      "phase": "C",
+      "representation": "R5_PERCEPTUAL",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 37
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-ee8838e0fda2d97fe8a6",
+      "duration_ms": 5600.87929997826,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 110,
+      "phase": "C",
+      "prompt_tokens": 336,
+      "representation": "R5_PERCEPTUAL",
+      "result": [
+        "1. Allowed state moves are {\"s4070\": [\"s4071\", \"s4072\"], \"s4071\": [\"s407g\"], \"s4072\": [\"s407d\"], \"s407d\": [], \"s407g\": []}. Start at s4070 and reach s407g."
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_VERIFICATION",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W037-4b990981"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "65c2ebf874e7e4c50727c2e9b938fa0923210a4f6c59a0ab7cead6f5baad8548"
+}

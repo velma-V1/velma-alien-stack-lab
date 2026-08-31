@@ -1,0 +1,47 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "FREE_JSON",
+      "cell_id": "D-461e86e986e659393d3a",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 4239,
+      "phase": "D",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260911,
+      "stage": null,
+      "world_id": null,
+      "world_index": 130
+    },
+    "outcome": {
+      "arm": "FREE_JSON",
+      "cell_id": "D-461e86e986e659393d3a",
+      "end_to_end_verified": false,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "first_attempt": {
+        "end_to_end_verified": false,
+        "schema_valid": false,
+        "semantic_executable": false,
+        "syntax_valid": false
+      },
+      "model_calls": 1,
+      "phase": "D",
+      "repair_attempt": null,
+      "repair_used": false,
+      "result": null,
+      "schema_valid": false,
+      "score": 0,
+      "semantic_errors": [
+        "json_parse_error"
+      ],
+      "semantic_executable": false,
+      "status": "VALID_UNRESOLVED_SEMANTIC",
+      "syntax_valid": false,
+      "transport_retries": 0,
+      "verified": false
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "486d39e5dcb460b80e4ed6f4806e2eba87c1086eb421210a5cbb3cea18dcbf06"
+}

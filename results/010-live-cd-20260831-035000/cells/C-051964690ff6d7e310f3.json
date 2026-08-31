@@ -1,0 +1,70 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-051964690ff6d7e310f3",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 1392,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 69
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-051964690ff6d7e310f3",
+      "duration_ms": 15981.566299975384,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 172,
+      "phase": "C",
+      "prompt_tokens": 895,
+      "representation": "R4_IMPLICIT",
+      "result": [
+        {
+          "group": 1,
+          "operations": "term_matching_ranking",
+          "outcomes": [
+            {
+              "authority": 1,
+              "id": "e759b",
+              "match_score": 2
+            },
+            {
+              "authority": 3,
+              "id": "e759c",
+              "match_score": 1
+            }
+          ]
+        },
+        {
+          "group": 2,
+          "operations": "graph_path_finding",
+          "outcomes": [
+            {
+              "goal": "n760c",
+              "hops": 2,
+              "path": [
+                "n760a",
+                "n760b",
+                "n760c"
+              ],
+              "start": "n760a"
+            }
+          ]
+        }
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_VERIFICATION",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W069-606ff2ea"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "26964613478a087e564bb3a5c078903a58dde4392429720cc351fd2382a0344b"
+}

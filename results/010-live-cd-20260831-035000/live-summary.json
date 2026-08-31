@@ -1,0 +1,152 @@
+{
+  "by_arm": {
+    "DETERMINISTIC_RECOGNIZER_BASIS": {
+      "invalid_cells": 0,
+      "terminal_cells": 960,
+      "valid_cells": 960,
+      "valid_unresolved": 592,
+      "verified_success_rate": 0.38333333333333336,
+      "verified_successes": 368
+    },
+    "FREE_JSON": {
+      "invalid_cells": 0,
+      "terminal_cells": 192,
+      "valid_cells": 192,
+      "valid_unresolved": 192,
+      "verified_success_rate": 0.0,
+      "verified_successes": 0
+    },
+    "LOCAL_SEMANTIC_COMPILER_BASIS": {
+      "invalid_cells": 0,
+      "terminal_cells": 960,
+      "valid_cells": 960,
+      "valid_unresolved": 960,
+      "verified_success_rate": 0.0,
+      "verified_successes": 0
+    },
+    "MODEL_DIRECT": {
+      "invalid_cells": 0,
+      "terminal_cells": 960,
+      "valid_cells": 960,
+      "valid_unresolved": 848,
+      "verified_success_rate": 0.11666666666666667,
+      "verified_successes": 112
+    },
+    "ORACLE_IR_BASIS": {
+      "invalid_cells": 0,
+      "terminal_cells": 960,
+      "valid_cells": 960,
+      "valid_unresolved": 40,
+      "verified_success_rate": 0.9583333333333334,
+      "verified_successes": 920
+    },
+    "SCHEMA_CONSTRAINED": {
+      "invalid_cells": 0,
+      "terminal_cells": 192,
+      "valid_cells": 192,
+      "valid_unresolved": 192,
+      "verified_success_rate": 0.0,
+      "verified_successes": 0
+    },
+    "SCHEMA_VALIDATE_REPAIR": {
+      "invalid_cells": 0,
+      "terminal_cells": 192,
+      "valid_cells": 192,
+      "valid_unresolved": 192,
+      "verified_success_rate": 0.0,
+      "verified_successes": 0
+    }
+  },
+  "by_representation": {
+    "R1_STRUCTURED": {
+      "invalid_cells": 0,
+      "terminal_cells": 768,
+      "valid_cells": 768,
+      "valid_unresolved": 372,
+      "verified_success_rate": 0.515625,
+      "verified_successes": 396
+    },
+    "R2_NATURAL": {
+      "invalid_cells": 0,
+      "terminal_cells": 768,
+      "valid_cells": 768,
+      "valid_unresolved": 565,
+      "verified_success_rate": 0.2643229166666667,
+      "verified_successes": 203
+    },
+    "R3_PARAPHRASED": {
+      "invalid_cells": 0,
+      "terminal_cells": 1056,
+      "valid_cells": 1056,
+      "valid_unresolved": 860,
+      "verified_success_rate": 0.1856060606060606,
+      "verified_successes": 196
+    },
+    "R4_IMPLICIT": {
+      "invalid_cells": 0,
+      "terminal_cells": 1056,
+      "valid_cells": 1056,
+      "valid_unresolved": 669,
+      "verified_success_rate": 0.3664772727272727,
+      "verified_successes": 387
+    },
+    "R5_PERCEPTUAL": {
+      "invalid_cells": 0,
+      "terminal_cells": 768,
+      "valid_cells": 768,
+      "valid_unresolved": 550,
+      "verified_success_rate": 0.2838541666666667,
+      "verified_successes": 218
+    }
+  },
+  "conclusion": "DISCOVERY_COMPLETE",
+  "enabled_live_phases": [
+    "C",
+    "D"
+  ],
+  "evidence_kinds": {
+    "LIVE_DETERMINISTIC_EVIDENCE": 960,
+    "LIVE_MODEL_EVIDENCE": 2496,
+    "ORACLE_DOWNSTREAM_CEILING": 960
+  },
+  "expected_cells": 4416,
+  "experiment": "010-computational-basis-atlas",
+  "invalid_cells": 0,
+  "ledger_hash": "d02a9afe11244cc6605711d2bf9625f130c1b80e6a1ea675c10bbc7141423eae",
+  "live_model_evidence": true,
+  "model_calls": 2688,
+  "profile": "live-cd-v1",
+  "rescue_cells": 960,
+  "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab",
+  "semantic_formalization_tax": {
+    "by_representation": {
+      "R1_STRUCTURED": {
+        "mean_tax": 1.0,
+        "paired_cells": 184
+      },
+      "R2_NATURAL": {
+        "mean_tax": 1.0,
+        "paired_cells": 184
+      },
+      "R3_PARAPHRASED": {
+        "mean_tax": 1.0,
+        "paired_cells": 184
+      },
+      "R4_IMPLICIT": {
+        "mean_tax": 1.0,
+        "paired_cells": 184
+      },
+      "R5_PERCEPTUAL": {
+        "mean_tax": 1.0,
+        "paired_cells": 184
+      }
+    },
+    "mean_tax": 1.0,
+    "paired_cells": 920,
+    "rescued_scores_substituted": false
+  },
+  "terminal_cells": 4416,
+  "transport_retries": 0,
+  "valid_unresolved": 3016,
+  "verified_successes": 1400
+}

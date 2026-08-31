@@ -1,0 +1,94 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-e13c72e150ebb4cef9a7",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 2392,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 119
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-e13c72e150ebb4cef9a7",
+      "duration_ms": 19149.803399981465,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 327,
+      "phase": "C",
+      "prompt_tokens": 877,
+      "representation": "R4_IMPLICIT",
+      "result": [
+        {
+          "goal": "s1309g",
+          "group": 1,
+          "outcome": "Path found: s13090 \u2192 s13091 \u2192 s1309g",
+          "path_length": 2,
+          "required_transitions": [
+            {
+              "from": "s13090",
+              "to": "s13091"
+            },
+            {
+              "from": "s13091",
+              "to": "s1309g"
+            }
+          ],
+          "start": "s13090"
+        },
+        {
+          "execution_steps": [
+            {
+              "operation": "set",
+              "result": 3,
+              "step": 1
+            },
+            {
+              "operation": "mul",
+              "result": 9,
+              "step": 2
+            },
+            {
+              "operation": "add",
+              "result": 9,
+              "step": 3
+            }
+          ],
+          "final_value": 9,
+          "group": 2,
+          "operations_executed": [
+            {
+              "name": "value",
+              "op": "set",
+              "value": 3
+            },
+            {
+              "name": "value",
+              "op": "mul",
+              "value": 3
+            },
+            {
+              "name": "value",
+              "op": "add",
+              "value": 0
+            }
+          ],
+          "outcome": "Program result: 9"
+        }
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_VERIFICATION",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W119-9827c719"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "5c08d0c85275da4da3ebb2f452b204c04c6c0cad80d55b1bc2fe5637d7d5268f"
+}

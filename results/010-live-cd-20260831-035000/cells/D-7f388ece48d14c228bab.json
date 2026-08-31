@@ -1,0 +1,52 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "SCHEMA_VALIDATE_REPAIR",
+      "cell_id": "D-7f388ece48d14c228bab",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 4385,
+      "phase": "D",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260911,
+      "stage": null,
+      "world_id": null,
+      "world_index": 154
+    },
+    "outcome": {
+      "arm": "SCHEMA_VALIDATE_REPAIR",
+      "cell_id": "D-7f388ece48d14c228bab",
+      "end_to_end_verified": false,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "first_attempt": {
+        "end_to_end_verified": false,
+        "schema_valid": false,
+        "semantic_executable": false,
+        "syntax_valid": false
+      },
+      "model_calls": 2,
+      "phase": "D",
+      "repair_attempt": {
+        "end_to_end_verified": false,
+        "schema_valid": false,
+        "semantic_executable": false,
+        "syntax_valid": false
+      },
+      "repair_used": true,
+      "result": null,
+      "schema_valid": false,
+      "score": 0,
+      "semantic_errors": [
+        "MALFORMED_OUTPUT"
+      ],
+      "semantic_executable": false,
+      "status": "VALID_UNRESOLVED_SEMANTIC",
+      "syntax_valid": false,
+      "transport_retries": 0,
+      "verified": false
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "bdbd8c0335a2c9bcbd3d0cb91eeb9102cdc7b150976b9ff1bd55f882cbf0ac42"
+}

@@ -1,0 +1,29 @@
+{
+  "enabled_live_phases": [
+    "C",
+    "D"
+  ],
+  "expected_cells": 4416,
+  "experiment": "010-computational-basis-atlas",
+  "ledger_hash": "d02a9afe11244cc6605711d2bf9625f130c1b80e6a1ea675c10bbc7141423eae",
+  "profile": "live-cd-v1",
+  "run_identity": {
+    "endpoint": "http://127.0.0.1:11434",
+    "experiment": "010-computational-basis-atlas",
+    "generation_contract": {
+      "context_limit": 25600,
+      "max_output_tokens": 2048,
+      "sampling": "provider_default_frozen_per_complete_run",
+      "task_specific_tuning": false,
+      "transport_retries": 2
+    },
+    "model_digest": "441ec31e4d2aedceb97dd834b036db104d943fbe3dbc1e5c8ac95eeaa9141c77",
+    "model_id": "qwen3.5:9b-q8_0",
+    "profile": "live-cd-v1",
+    "prompt_contract_hash": "98630c9de97addc02470042a29a15c11afec09c746a3c55c498f4bc91ec5deaf",
+    "provider_kind": "ollama",
+    "provider_version": "0.32.15",
+    "system_version": "S0"
+  },
+  "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+}
