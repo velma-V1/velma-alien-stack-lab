@@ -1,0 +1,98 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-2c788f1502c6441c76a2",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 2732,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 136
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-2c788f1502c6441c76a2",
+      "duration_ms": 27359.544900013134,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 321,
+      "phase": "C",
+      "prompt_tokens": 1355,
+      "representation": "R4_IMPLICIT",
+      "result": [
+        {
+          "group": 1,
+          "operations": [
+            {
+              "from": "fact1496",
+              "to": "mid1496",
+              "type": "rule_application"
+            },
+            {
+              "from": "mid1496",
+              "to": "goal1496",
+              "type": "rule_application"
+            }
+          ],
+          "outcome": true
+        },
+        {
+          "group": 2,
+          "operations": [
+            {
+              "items": [
+                "i1497a",
+                "i1497b"
+              ],
+              "total_cost": 5,
+              "total_value": 28,
+              "type": "item_selection"
+            }
+          ],
+          "outcome": {
+            "max_value": 28,
+            "selected_items": [
+              "i1497a",
+              "i1497b"
+            ]
+          }
+        },
+        {
+          "group": 3,
+          "operations": [
+            {
+              "from": "s14980",
+              "to": "s14981",
+              "type": "transition"
+            },
+            {
+              "from": "s14981",
+              "to": "s1498g",
+              "type": "transition"
+            }
+          ],
+          "outcome": {
+            "goal_reached": true,
+            "path": [
+              "s14980",
+              "s14981",
+              "s1498g"
+            ]
+          }
+        }
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_VERIFICATION",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W136-c9daf252"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "96eb204c1d355cf9be5897caa6bb3de646989aeb7d41187c5be085bf39b23656"
+}

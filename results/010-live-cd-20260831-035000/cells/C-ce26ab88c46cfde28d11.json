@@ -1,0 +1,48 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "DETERMINISTIC_RECOGNIZER_BASIS",
+      "cell_id": "C-ce26ab88c46cfde28d11",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 3633,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 181
+    },
+    "outcome": {
+      "arm": "DETERMINISTIC_RECOGNIZER_BASIS",
+      "cell_id": "C-ce26ab88c46cfde28d11",
+      "errors": [],
+      "evidence_kind": "LIVE_DETERMINISTIC_EVIDENCE",
+      "model_calls": 0,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "result": [
+        9.0,
+        15,
+        [
+          "e1993b",
+          "e1993c"
+        ],
+        [
+          "n1994a",
+          "n1994b",
+          "n1994c"
+        ],
+        true
+      ],
+      "score": 1,
+      "status": "VERIFIED_SUCCESS",
+      "transport_retries": 0,
+      "verified": true,
+      "world_id": "W181-420fbcd2"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "8add34eaa77099f2a8db9d568a12bce3c8c73dc5600d6f1d008298c68c6255a4"
+}

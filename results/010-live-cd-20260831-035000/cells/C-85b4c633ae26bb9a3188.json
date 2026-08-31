@@ -1,0 +1,75 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-85b4c633ae26bb9a3188",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 2212,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 110
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-85b4c633ae26bb9a3188",
+      "duration_ms": 17934.56329999026,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 175,
+      "phase": "C",
+      "prompt_tokens": 1000,
+      "representation": "R4_IMPLICIT",
+      "result": [
+        [
+          {
+            "authority": 1,
+            "id": "e1210b",
+            "match_count": 2,
+            "terms_matched": [
+              "topic1210",
+              "shared"
+            ]
+          },
+          {
+            "authority": 2,
+            "id": "e1210a",
+            "match_count": 1,
+            "terms_matched": [
+              "topic1210"
+            ]
+          }
+        ],
+        [
+          {
+            "edges_used": 2,
+            "path": [
+              "n1211a",
+              "n1211b",
+              "n1211c"
+            ]
+          },
+          {
+            "edges_used": 2,
+            "path": [
+              "n1211a",
+              "n1211x",
+              "n1211c"
+            ]
+          }
+        ]
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_VERIFICATION",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W110-6c6b3342"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "9679983d8b87a0c43996f9fc6245228fc787527c40b2561ee65182daae202e03"
+}

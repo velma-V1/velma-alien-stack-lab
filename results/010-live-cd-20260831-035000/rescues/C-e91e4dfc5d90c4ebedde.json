@@ -1,0 +1,100 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "LOCAL_SEMANTIC_COMPILER_BASIS",
+      "cell_id": "C-e91e4dfc5d90c4ebedde",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 3694,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 184
+    },
+    "original_evidence_sha256": "80bcaa82c10ecb29b6de6c06358f0a78f866c5cdd3634a6a6942989deb772b10",
+    "rescue": {
+      "evidence_kind": "RESCUE_DIAGNOSTIC",
+      "localized_bottleneck": "MISSING_CAPABILITY",
+      "original_score": 0,
+      "original_status": "VALID_UNRESOLVED_SEMANTIC",
+      "rescued_score": 0,
+      "rescued_status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+      "stages": [
+        {
+          "applicable": true,
+          "distinguishable": true,
+          "score": 0,
+          "stage": "ORIGINAL",
+          "status": "VALID_UNRESOLVED_SEMANTIC",
+          "verified": false
+        },
+        {
+          "applicable": true,
+          "distinguishable": true,
+          "score": 0,
+          "stage": "ORACLE_TASK_IR",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        },
+        {
+          "applicable": true,
+          "distinguishable": false,
+          "note": "Phase C has no separate decomposition mechanism; collapsed with ORACLE_TASK_IR.",
+          "score": 0,
+          "stage": "ORACLE_DECOMPOSITION",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        },
+        {
+          "applicable": true,
+          "distinguishable": true,
+          "score": 0,
+          "stage": "ORACLE_ROUTING",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        },
+        {
+          "applicable": true,
+          "distinguishable": true,
+          "score": 0,
+          "stage": "ORACLE_ENGINE_OUTPUTS",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        },
+        {
+          "applicable": false,
+          "distinguishable": false,
+          "note": "Phase C operations have no Phase-F-style causal typed bindings; handoff is not separately identifiable.",
+          "score": 0,
+          "stage": "ORACLE_TYPED_HANDOFF",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        },
+        {
+          "applicable": true,
+          "distinguishable": false,
+          "note": "Phase C has no separately intervenable execution layer after oracle engine outputs; collapsed with ORACLE_ENGINE_OUTPUTS.",
+          "score": 0,
+          "stage": "ORACLE_EXECUTION",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        },
+        {
+          "applicable": true,
+          "distinguishable": false,
+          "note": "Phase C does not independently intervene on verifier behavior in this rescue path; no separate localization claim is made.",
+          "score": 0,
+          "stage": "VERIFIER_DISCRIMINATION",
+          "status": "VALID_UNRESOLVED_MISSING_CAPABILITY",
+          "verified": false
+        }
+      ],
+      "world_id": "W184-6ffc353c"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "e34e91af559b735f69494aabc3ef088559197f770bace405b6fe3f22d26e4b21"
+}

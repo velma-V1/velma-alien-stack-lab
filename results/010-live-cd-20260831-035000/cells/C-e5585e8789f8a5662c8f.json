@@ -1,0 +1,41 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "LOCAL_SEMANTIC_COMPILER_BASIS",
+      "cell_id": "C-e5585e8789f8a5662c8f",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 514,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 25
+    },
+    "outcome": {
+      "arm": "LOCAL_SEMANTIC_COMPILER_BASIS",
+      "cell_id": "C-e5585e8789f8a5662c8f",
+      "duration_ms": 9352.506000024732,
+      "errors": [
+        "DATA_ROWS_INVALID"
+      ],
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 106,
+      "phase": "C",
+      "prompt_tokens": 580,
+      "representation": "R4_IMPLICIT",
+      "result": [],
+      "score": 0,
+      "semantic_errors": [],
+      "status": "VALID_UNRESOLVED_ENGINE",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W025-f1252049"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "c5625e04e8b681172d46e93746ef227d78dd9949ee59a60e6606ff24c6d966b8"
+}

@@ -1,0 +1,50 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "SCHEMA_CONSTRAINED",
+      "cell_id": "D-b44073e8993d277e6c53",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 4147,
+      "phase": "D",
+      "representation": "R3_PARAPHRASED",
+      "seed": 20260911,
+      "stage": null,
+      "world_id": null,
+      "world_index": 115
+    },
+    "outcome": {
+      "arm": "SCHEMA_CONSTRAINED",
+      "cell_id": "D-b44073e8993d277e6c53",
+      "end_to_end_verified": false,
+      "errors": [
+        "GRAPH_INPUT_INVALID"
+      ],
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "first_attempt": {
+        "end_to_end_verified": false,
+        "schema_valid": true,
+        "semantic_executable": false,
+        "syntax_valid": true
+      },
+      "model_calls": 1,
+      "phase": "D",
+      "repair_attempt": null,
+      "repair_used": false,
+      "result": [],
+      "schema_valid": true,
+      "score": 0,
+      "semantic_errors": [
+        "GRAPH_INPUT_INVALID"
+      ],
+      "semantic_executable": false,
+      "status": "VALID_UNRESOLVED_ENGINE",
+      "syntax_valid": true,
+      "transport_retries": 0,
+      "verified": false
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "0c09937f7341ed24b1c9c195f608af0c3cbb3d09de63ab484251a4fe4f77837f"
+}

@@ -1,0 +1,62 @@
+{
+  "payload": {
+    "cell": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-8bf42583d86f60f8d443",
+      "condition": null,
+      "lineage_index": null,
+      "metadata": {},
+      "order": 852,
+      "phase": "C",
+      "representation": "R4_IMPLICIT",
+      "seed": 20260910,
+      "stage": null,
+      "world_id": null,
+      "world_index": 42
+    },
+    "outcome": {
+      "arm": "MODEL_DIRECT",
+      "cell_id": "C-8bf42583d86f60f8d443",
+      "duration_ms": 15000.462600030005,
+      "evidence_kind": "LIVE_MODEL_EVIDENCE",
+      "model_calls": 1,
+      "output_tokens": 163,
+      "phase": "C",
+      "prompt_tokens": 755,
+      "representation": "R4_IMPLICIT",
+      "result": [
+        {
+          "alternative_paths_blocked": [
+            "s4622 -> s462d"
+          ],
+          "goal_state": "s462g",
+          "group_id": 1,
+          "operations": [
+            {
+              "from": "s4620",
+              "to": "s4621"
+            },
+            {
+              "from": "s4621",
+              "to": "s462g"
+            }
+          ],
+          "path": [
+            "s4620",
+            "s4621",
+            "s462g"
+          ],
+          "start_state": "s4620",
+          "valid_transitions_only": true
+        }
+      ],
+      "score": 0,
+      "status": "VALID_UNRESOLVED_VERIFICATION",
+      "transport_retries": 0,
+      "verified": false,
+      "world_id": "W042-20d586aa"
+    },
+    "run_identity_hash": "aeec75a202d0ef8f5be76a821df811a3b3cfbdb91fc35af18937a6eddfa282ab"
+  },
+  "sha256": "871c3ac86ba479c9f3fe9083708b146ea25531a9c257eed4f8bc2b6e3a02e056"
+}
